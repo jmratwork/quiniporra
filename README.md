@@ -11,6 +11,8 @@ Inspirado en la arquitectura de
 [jmratwork/porrafutbol](https://github.com/jmratwork/porrafutbol) (Next.js 14),
 pero con el stack actual.
 
+**Repositorio:** <https://github.com/jmratwork/quiniporra>
+
 ## Stack
 
 - **Next.js 15** (App Router) + **React 19** + **TypeScript**
@@ -69,9 +71,11 @@ determina cuántos signos debe marcar:
 - Node.js 18.18+ (probado con Node 24)
 - Una base de datos PostgreSQL (local o gratuita en la nube, ver más abajo)
 
-### 2. Instalar dependencias
+### 2. Clonar e instalar dependencias
 
 ```bash
+git clone https://github.com/jmratwork/quiniporra.git
+cd quiniporra
 npm install
 ```
 
