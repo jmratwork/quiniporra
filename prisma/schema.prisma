@@ -1,0 +1,107 @@
+// Prisma schema — quiniporra
+// Documentación: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EstadoQuiniela {
+  ABIERTA
+  CERRADA
+}
+
+enum OrigenQuiniela {
+  AUTOMATICO
+  MANUAL
+}
+
+enum Multiplicidad {
+  SIMPLE
+  DOBLE
+  TRIPLE
+}
+
+enum EstadoInvitacion {
+  PENDIENTE
+  USADA
+  ANULADA
+}
+
+/// Una Quiniela representa la jornada actual. Solo puede haber una activa a la vez.
+model Quiniela {
+  id          String         @id @default(cuid())
+  jornada     String
+  fechaCierre DateTime?
+  estado      EstadoQuiniela @default(ABIERTA)
+  origen      OrigenQuiniela @default(AUTOMATICO)
+  createdAt   DateTime       @default(now())
+
+  partidos Partido[]
+
+  @@map("quinielas")
+}
+
+/// Cada Quiniela tiene exactamente 15 partidos (1-14 + Pleno al 15).
+model Partido {
+  id            String         @id @default(cuid())
+  quinielaId    String
+  numero        Int // 1..15
+  local         String
+  visitante     String
+  multiplicidad Multiplicidad? // nulo hasta que exista una invitación para el partido
+  esPleno       Boolean        @default(false) // true cuando numero == 15
+
+  quiniela     Quiniela      @relation(fields: [quinielaId], references: [id], onDelete: Cascade)
+  invitaciones Invitacion[]
+  apuesta      Apuesta?
+
+  @@unique([quinielaId, numero])
+  @@index([quinielaId])
+  @@map("partidos")
+}
+
+/// Invitación a apostar un partido concreto. El token real no se guarda: solo su hash.
+model Invitacion {
+  id            String           @id @default(cuid())
+  partidoId     String
+  nombreJugador String
+  multiplicidad Multiplicidad
+  tokenHash     String           @unique
+  estado        EstadoInvitacion @default(PENDIENTE)
+  createdAt     DateTime         @default(now())
+  usedAt        DateTime?
+
+  partido Partido   @relation(fields: [partidoId], references: [id], onDelete: Cascade)
+  apuesta Apuesta?
+
+  @@index([partidoId])
+  @@map("invitaciones")
+}
+
+/// Apuesta registrada para un partido. La restricción única sobre
+/// (quinielaId, numeroPartido) garantiza "una sola apuesta por partido"
+/// a nivel de base de datos y evita condiciones de carrera.
+model Apuesta {
+  id            String   @id @default(cuid())
+  partidoId     String   @unique
+  invitacionId  String   @unique
+  quinielaId    String
+  numeroPartido Int
+  nombreJugador String
+  /// Para partidos 1-14: JSON con un subconjunto de ["1","X","2"].
+  /// Para el Pleno al 15: JSON { local: string[], visitante: string[] } con valores en ["0","1","M"].
+  signos        Json
+  createdAt     DateTime @default(now())
+
+  partido    Partido    @relation(fields: [partidoId], references: [id], onDelete: Cascade)
+  invitacion Invitacion @relation(fields: [invitacionId], references: [id], onDelete: Cascade)
+
+  @@unique([quinielaId, numeroPartido])
+  @@index([quinielaId])
+  @@map("apuestas")
+}
