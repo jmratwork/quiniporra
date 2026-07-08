@@ -14,18 +14,24 @@ export const dynamic = 'force-dynamic';
  *    invitaciones y su estado).
  */
 export async function GET(req: NextRequest) {
+  // La autenticación NO depende de la base de datos: se calcula primero, para
+  // que el admin pueda entrar aunque todavía no exista ninguna Quiniela o la
+  // BD no responda (si no, el login mostraría "PIN incorrecto" por error).
+  const pin = extraePin(req);
+  const esAdmin =
+    !!pin && !!process.env.ADMIN_PIN && pin === process.env.ADMIN_PIN;
+
   try {
     const q = await getQuinielaActiva();
-    if (!q) {
-      return ok({ quiniela: null });
-    }
-
-    const pin = extraePin(req);
-    const esAdmin = !!pin && !!process.env.ADMIN_PIN && pin === process.env.ADMIN_PIN;
-
-    return ok({ quiniela: esAdmin ? vistaAdmin(q) : vistaPublica(q), esAdmin });
+    return ok({
+      quiniela: q ? (esAdmin ? vistaAdmin(q) : vistaPublica(q)) : null,
+      esAdmin,
+    });
   } catch (e) {
-    return manejaError(e);
+    // Fallo de BD: devolvemos igualmente esAdmin (200) para no bloquear el
+    // login; el panel podrá avisar del problema de base de datos.
+    console.error('GET /api/quiniela — error de base de datos:', e);
+    return ok({ quiniela: null, esAdmin, errorBd: true });
   }
 }
 

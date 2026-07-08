@@ -70,6 +70,12 @@ export default function AdminPage() {
           return false;
         }
         setQuiniela(json.quiniela ?? null);
+        if (json.errorBd) {
+          setToast({
+            tipo: 'error',
+            texto: 'Sesión iniciada, pero la base de datos no responde. Revisa DATABASE_URL y las migraciones.',
+          });
+        }
         return true;
       } catch {
         setToast({ tipo: 'error', texto: 'No se pudo conectar con el servidor.' });
