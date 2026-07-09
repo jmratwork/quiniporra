@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { CasillasSignos } from './CasillasSignos';
+import { Escudo } from './Escudo';
 import { Toast, type MensajeToast } from './Toast';
 import { SIGNOS_1X2, VALORES_PLENO } from '@/lib/validation';
 
@@ -55,26 +56,30 @@ export function FormularioApuesta({ token }: { token: string }) {
   }, [cargar]);
 
   if (estado.fase === 'cargando') {
-    return <div className="card p-8 text-center text-slate-500">Cargando invitación…</div>;
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <p className="animate-pulse text-cesped-300">Cargando invitación…</p>
+      </div>
+    );
   }
 
   if (estado.fase === 'noexiste') {
     return (
-      <div className="card p-8 text-center">
-        <div className="text-3xl">🔎</div>
-        <h1 className="mt-2 text-lg font-bold text-slate-800">Enlace no válido</h1>
-        <p className="mt-1 text-sm text-slate-500">{estado.mensaje}</p>
+      <div className="card mx-auto max-w-lg animate-rise-in p-10 text-center">
+        <div className="text-4xl">🔎</div>
+        <h1 className="mt-3 text-xl font-black text-white">Enlace no válido</h1>
+        <p className="mt-1 text-sm text-slate-400">{estado.mensaje}</p>
       </div>
     );
   }
 
   if (estado.fase === 'tarde') {
     return (
-      <div className="card border-red-200 p-8 text-center">
-        <div className="text-3xl">⏱️</div>
-        <h1 className="mt-2 text-lg font-bold text-red-700">Llegas tarde</h1>
-        <p className="mt-1 text-sm text-slate-500">{estado.mensaje}</p>
-        <p className="mt-2 text-xs text-slate-400">
+      <div className="mx-auto max-w-lg animate-rise-in rounded-2xl border border-red-400/30 bg-red-400/[0.06] p-10 text-center shadow-2xl">
+        <div className="text-4xl">⏱️</div>
+        <h1 className="mt-3 text-xl font-black text-red-300">Llegas tarde</h1>
+        <p className="mt-1 text-sm text-slate-300">{estado.mensaje}</p>
+        <p className="mt-3 text-xs text-slate-500">
           Otro jugador apostó este partido antes. Tu invitación ha quedado anulada.
         </p>
       </div>
@@ -83,10 +88,10 @@ export function FormularioApuesta({ token }: { token: string }) {
 
   if (estado.fase === 'hecha') {
     return (
-      <div className="card border-emerald-200 p-8 text-center">
-        <div className="text-3xl">✅</div>
-        <h1 className="mt-2 text-lg font-bold text-emerald-700">¡Apuesta registrada!</h1>
-        <p className="mt-1 text-sm text-slate-500">
+      <div className="mx-auto max-w-lg animate-rise-in rounded-2xl border border-cesped-400/30 bg-cesped-400/[0.08] p-10 text-center shadow-glow">
+        <div className="text-4xl">🍀</div>
+        <h1 className="mt-3 text-xl font-black text-cesped-200">¡Apuesta registrada!</h1>
+        <p className="mt-1 text-sm text-slate-300">
           Gracias por participar. Tu pronóstico ha quedado guardado.
         </p>
       </div>
@@ -97,8 +102,7 @@ export function FormularioApuesta({ token }: { token: string }) {
   const { partido, multiplicidad, marcasExigidas } = datos;
 
   const completo = partido.esPleno
-    ? plenoLocal.length === marcasExigidas &&
-      plenoVisitante.length === marcasExigidas
+    ? plenoLocal.length === marcasExigidas && plenoVisitante.length === marcasExigidas
     : valores.length === marcasExigidas;
 
   async function enviar() {
@@ -119,7 +123,10 @@ export function FormularioApuesta({ token }: { token: string }) {
       } else if (res.status === 409) {
         setEstado({ fase: 'tarde', mensaje: json.error ?? 'Llegas tarde.' });
       } else {
-        setToast({ tipo: 'error', texto: json.error ?? 'No se pudo registrar la apuesta.' });
+        setToast({
+          tipo: 'error',
+          texto: json.error ?? 'No se pudo registrar la apuesta.',
+        });
       }
     } catch {
       setToast({ tipo: 'error', texto: 'Error de red al enviar la apuesta.' });
@@ -129,38 +136,56 @@ export function FormularioApuesta({ token }: { token: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-lg space-y-5">
-      <div className="card p-5">
-        <p className="text-xs uppercase tracking-wide text-slate-400">{datos.jornada}</p>
-        <h1 className="mt-1 text-lg font-bold text-slate-800">
-          Hola, {datos.nombreJugador} 👋
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Te toca apostar el partido <strong>nº {partido.numero}</strong>.
-        </p>
+    <div className="mx-auto max-w-lg animate-rise-in space-y-5">
+      {/* Hero del partido */}
+      <header className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-noche-700 to-noche-950 p-6 text-center shadow-2xl">
+        <div className="pointer-events-none absolute inset-x-0 -top-24 h-48 bg-cesped-500/20 blur-3xl" />
 
-        <div className="mt-4 rounded-lg bg-slate-50 p-4 text-center">
-          <div className="text-base font-semibold text-slate-800">
-            {partido.local} <span className="text-slate-400">vs</span> {partido.visitante}
+        <div className="relative">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+            {datos.jornada}
+          </p>
+          <h1 className="mt-1 text-xl font-black text-white">
+            Hola, {datos.nombreJugador} 👋
+          </h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Te toca apostar el partido{' '}
+            <span className="font-bold text-cesped-300">nº {partido.numero}</span>
+          </p>
+
+          <div className="mt-6 flex items-center justify-center gap-4">
+            <div className="flex flex-1 flex-col items-center gap-2">
+              <Escudo nombre={partido.local} size={56} />
+              <span className="text-sm font-bold text-white">{partido.local}</span>
+            </div>
+            <span className="text-2xl font-black text-cesped-400">–</span>
+            <div className="flex flex-1 flex-col items-center gap-2">
+              <Escudo nombre={partido.visitante} size={56} />
+              <span className="text-sm font-bold text-white">{partido.visitante}</span>
+            </div>
           </div>
+
           {partido.esPleno && (
-            <div className="mt-1 text-xs font-medium text-amber-600">Pleno al 15</div>
+            <span className="badge mt-4 bg-oro-400/15 text-oro-300 ring-oro-400/30">
+              🏁 Pleno al 15
+            </span>
           )}
         </div>
+      </header>
 
-        <div className="mt-4 rounded-lg border border-quiniela/30 bg-quiniela-light px-3 py-2 text-sm text-quiniela-dark">
-          Multiplicidad <strong>{multiplicidad.toLowerCase()}</strong>: debes marcar
-          exactamente <strong>{marcasExigidas}</strong>{' '}
+      <div className="card p-5 sm:p-6">
+        <div className="rounded-xl border border-cesped-400/30 bg-cesped-400/[0.08] px-4 py-3 text-sm text-cesped-100">
+          Multiplicidad <strong className="font-black">{multiplicidad.toLowerCase()}</strong>
+          : debes marcar exactamente{' '}
+          <strong className="font-black">{marcasExigidas}</strong>{' '}
           {partido.esPleno ? 'valor(es) por equipo' : 'signo(s)'}.
         </div>
 
-        <div className="mt-5">
+        <div className="mt-6">
           {partido.esPleno ? (
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div>
-                <p className="mb-1.5 text-sm font-medium text-slate-600">
-                  Goles {partido.local}
-                </p>
+                <span className="label">Goles {partido.local}</span>
                 <CasillasSignos
                   opciones={VALORES_PLENO}
                   seleccion={plenoLocal}
@@ -169,9 +194,7 @@ export function FormularioApuesta({ token }: { token: string }) {
                 />
               </div>
               <div>
-                <p className="mb-1.5 text-sm font-medium text-slate-600">
-                  Goles {partido.visitante}
-                </p>
+                <span className="label">Goles {partido.visitante}</span>
                 <CasillasSignos
                   opciones={VALORES_PLENO}
                   seleccion={plenoVisitante}
@@ -182,7 +205,7 @@ export function FormularioApuesta({ token }: { token: string }) {
             </div>
           ) : (
             <div>
-              <p className="mb-1.5 text-sm font-medium text-slate-600">Tu pronóstico</p>
+              <span className="label">Tu pronóstico</span>
               <CasillasSignos
                 opciones={SIGNOS_1X2}
                 seleccion={valores}
@@ -197,12 +220,12 @@ export function FormularioApuesta({ token }: { token: string }) {
           type="button"
           onClick={enviar}
           disabled={!completo || enviando}
-          className="btn-primary mt-6 w-full"
+          className="btn-primary mt-7 w-full"
         >
           {enviando ? 'Enviando…' : 'Confirmar apuesta'}
         </button>
         {!completo && (
-          <p className="mt-2 text-center text-xs text-slate-400">
+          <p className="mt-2 text-center text-xs text-slate-500">
             Marca exactamente las casillas exigidas para poder confirmar.
           </p>
         )}

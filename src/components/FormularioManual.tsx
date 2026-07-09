@@ -18,7 +18,7 @@ const FILAS = Array.from({ length: 15 }, (_, i) => i + 1);
 
 /**
  * Formulario de fallback: introducir los 15 partidos a mano cuando la carga
- * automática desde SELAE falla. El partido 15 es el Pleno al 15.
+ * automática falla. El partido 15 es el Pleno al 15.
  */
 export function FormularioManual({
   onEnviar,
@@ -62,13 +62,14 @@ export function FormularioManual({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2">
+    <div className="animate-rise-in space-y-5">
+      <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">
+          <label className="label" htmlFor="manual-jornada">
             Nombre de la jornada
           </label>
           <input
+            id="manual-jornada"
             className="input"
             placeholder="Jornada 34 - 2025/2026"
             value={jornada}
@@ -76,10 +77,11 @@ export function FormularioManual({
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">
+          <label className="label" htmlFor="manual-cierre">
             Fecha de cierre (opcional)
           </label>
           <input
+            id="manual-cierre"
             type="datetime-local"
             className="input"
             value={fechaCierre}
@@ -88,31 +90,33 @@ export function FormularioManual({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-slate-200">
+      <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
         {partidos.map((p) => (
           <div
             key={p.numero}
-            className="flex items-center gap-2 border-b border-slate-100 px-2 py-1.5 last:border-0"
+            className="flex items-center gap-2 border-b border-white/5 px-3 py-2 last:border-0"
           >
             <span
-              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+              className={`flex h-7 w-7 flex-none items-center justify-center rounded-full text-xs font-black tabular-nums ring-1 ${
                 p.numero === 15
-                  ? 'bg-amber-100 text-amber-700'
-                  : 'bg-slate-100 text-slate-600'
+                  ? 'bg-oro-400/15 text-oro-300 ring-oro-400/30'
+                  : 'bg-white/[0.06] text-slate-300 ring-white/10'
               }`}
             >
               {p.numero}
             </span>
             <input
-              className="input py-1"
-              placeholder={p.numero === 15 ? 'Local (Pleno)' : 'Local'}
+              className="input py-1.5 text-sm"
+              placeholder={p.numero === 15 ? 'Local (Pleno al 15)' : 'Local'}
+              aria-label={`Equipo local del partido ${p.numero}`}
               value={p.local}
               onChange={(e) => actualiza(p.numero, 'local', e.target.value)}
             />
-            <span className="text-xs text-slate-400">–</span>
+            <span className="text-xs text-slate-600">–</span>
             <input
-              className="input py-1"
+              className="input py-1.5 text-sm"
               placeholder="Visitante"
+              aria-label={`Equipo visitante del partido ${p.numero}`}
               value={p.visitante}
               onChange={(e) => actualiza(p.numero, 'visitante', e.target.value)}
             />
@@ -120,14 +124,13 @@ export function FormularioManual({
         ))}
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && (
+        <p className="rounded-xl border border-red-400/30 bg-red-400/[0.08] px-3 py-2 text-sm font-medium text-red-200">
+          {error}
+        </p>
+      )}
 
-      <button
-        type="button"
-        onClick={enviar}
-        disabled={enviando}
-        className="btn-primary w-full"
-      >
+      <button type="button" onClick={enviar} disabled={enviando} className="btn-primary w-full">
         {enviando ? 'Creando…' : 'Crear jornada manualmente'}
       </button>
     </div>

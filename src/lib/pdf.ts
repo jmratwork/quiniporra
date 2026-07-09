@@ -30,7 +30,8 @@ export interface BoletoPdf {
   partidos: PartidoPdf[];
 }
 
-const VERDE = rgb(0.05, 0.43, 0.25);
+// cesped-600 (#16a34a): el mismo verde de marca que la interfaz.
+const VERDE = rgb(0.086, 0.639, 0.29);
 const NEGRO = rgb(0.1, 0.1, 0.1);
 const GRIS = rgb(0.6, 0.6, 0.6);
 const BLANCO = rgb(1, 1, 1);

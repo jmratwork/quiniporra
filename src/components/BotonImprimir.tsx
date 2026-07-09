@@ -1,9 +1,10 @@
 /**
  * Botón con icono de impresora que descarga el PDF del boleto.
  * Es un simple enlace a /api/quiniela/pdf (que responde con attachment).
+ * Va en dorado: marca el hito de "boleto completo".
  */
 export function BotonImprimir({
-  className = 'btn-primary',
+  className = 'btn-amber',
 }: {
   className?: string;
 }) {

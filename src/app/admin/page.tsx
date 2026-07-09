@@ -5,6 +5,7 @@ import { FormularioManual, type DatosManual } from '@/components/FormularioManua
 import { Toast, type MensajeToast } from '@/components/Toast';
 import { BotonImprimir } from '@/components/BotonImprimir';
 import { CasillasSignos } from '@/components/CasillasSignos';
+import { Escudo } from '@/components/Escudo';
 import { SIGNOS_1X2, VALORES_PLENO, type Multiplicidad } from '@/lib/validation';
 
 const CLAVE_PIN = 'quiniporra_pin';
@@ -26,7 +27,10 @@ interface PartidoAdmin {
   esPleno: boolean;
   multiplicidad: Mult | null;
   estado: 'PENDIENTE' | 'APOSTADO';
-  signos: { tipo: '1X2'; valores: string[] } | { tipo: 'PLENO'; local: string[]; visitante: string[] } | null;
+  signos:
+    | { tipo: '1X2'; valores: string[] }
+    | { tipo: 'PLENO'; local: string[]; visitante: string[] }
+    | null;
   nombreJugador: string | null;
   invitaciones: InvitacionVista[];
 }
@@ -42,9 +46,9 @@ interface QuinielaAdmin {
 }
 
 const badgeInv: Record<InvitacionVista['estado'], string> = {
-  PENDIENTE: 'bg-amber-100 text-amber-700',
-  USADA: 'bg-emerald-100 text-emerald-700',
-  ANULADA: 'bg-slate-200 text-slate-500',
+  PENDIENTE: 'bg-oro-400/15 text-oro-300 ring-oro-400/30',
+  USADA: 'bg-cesped-400/15 text-cesped-300 ring-cesped-400/30',
+  ANULADA: 'bg-white/[0.06] text-slate-500 ring-white/10',
 };
 
 export default function AdminPage() {
@@ -56,36 +60,34 @@ export default function AdminPage() {
   const [modoManual, setModoManual] = useState(false);
   const [toast, setToast] = useState<MensajeToast | null>(null);
 
-  const cargar = useCallback(
-    async (pinUsar: string): Promise<boolean> => {
-      setCargando(true);
-      try {
-        const res = await fetch('/api/quiniela', {
-          headers: { 'x-admin-pin': pinUsar },
-          cache: 'no-store',
-        });
-        const json = await res.json();
-        if (!json.esAdmin) {
-          setToast({ tipo: 'error', texto: 'PIN incorrecto.' });
-          return false;
-        }
-        setQuiniela(json.quiniela ?? null);
-        if (json.errorBd) {
-          setToast({
-            tipo: 'error',
-            texto: 'Sesión iniciada, pero la base de datos no responde. Revisa DATABASE_URL y las migraciones.',
-          });
-        }
-        return true;
-      } catch {
-        setToast({ tipo: 'error', texto: 'No se pudo conectar con el servidor.' });
+  const cargar = useCallback(async (pinUsar: string): Promise<boolean> => {
+    setCargando(true);
+    try {
+      const res = await fetch('/api/quiniela', {
+        headers: { 'x-admin-pin': pinUsar },
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      if (!json.esAdmin) {
+        setToast({ tipo: 'error', texto: 'PIN incorrecto.' });
         return false;
-      } finally {
-        setCargando(false);
       }
-    },
-    [],
-  );
+      setQuiniela(json.quiniela ?? null);
+      if (json.errorBd) {
+        setToast({
+          tipo: 'error',
+          texto:
+            'Sesión iniciada, pero la base de datos no responde. Revisa DATABASE_URL y las migraciones.',
+        });
+      }
+      return true;
+    } catch {
+      setToast({ tipo: 'error', texto: 'No se pudo conectar con el servidor.' });
+      return false;
+    } finally {
+      setCargando(false);
+    }
+  }, []);
 
   // Restaura sesión si había PIN guardado.
   useEffect(() => {
@@ -139,7 +141,7 @@ export default function AdminPage() {
       if (res.status === 502) {
         setToast({
           tipo: 'error',
-          texto: `No se pudo cargar la jornada desde SELAE. Usa el formulario manual.`,
+          texto: 'No se pudo cargar la jornada automáticamente. Usa el formulario manual.',
         });
         setModoManual(true);
         return;
@@ -148,7 +150,7 @@ export default function AdminPage() {
         setToast({ tipo: 'error', texto: json.error ?? 'Error al iniciar.' });
         return;
       }
-      setToast({ tipo: 'exito', texto: 'Jornada cargada desde SELAE.' });
+      setToast({ tipo: 'exito', texto: 'Jornada cargada correctamente.' });
       await cargar(pin);
     } finally {
       setIniciando(false);
@@ -200,20 +202,27 @@ export default function AdminPage() {
   // --- Login ---
   if (!autenticado) {
     return (
-      <div className="mx-auto max-w-sm">
-        <form onSubmit={login} className="card space-y-4 p-6">
-          <div>
-            <h1 className="text-lg font-bold text-slate-800">Panel de administración</h1>
-            <p className="text-sm text-slate-500">Introduce el PIN para continuar.</p>
+      <div className="mx-auto max-w-sm animate-rise-in">
+        <form onSubmit={login} className="card space-y-5 p-6 sm:p-7">
+          <div className="text-center">
+            <div className="text-4xl">🔒</div>
+            <h1 className="mt-2 text-xl font-black text-white">Panel de administración</h1>
+            <p className="mt-1 text-sm text-slate-400">Introduce el PIN para continuar.</p>
           </div>
-          <input
-            type="password"
-            className="input"
-            placeholder="PIN de administración"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            autoFocus
-          />
+          <div>
+            <label className="label" htmlFor="pin">
+              PIN de administración
+            </label>
+            <input
+              id="pin"
+              type="password"
+              className="input"
+              placeholder="••••••••••••"
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              autoFocus
+            />
+          </div>
           <button type="submit" disabled={cargando} className="btn-primary w-full">
             {cargando ? 'Comprobando…' : 'Entrar'}
           </button>
@@ -224,89 +233,102 @@ export default function AdminPage() {
   }
 
   const cerrada = quiniela?.estado === 'CERRADA';
+  const progreso = quiniela ? (quiniela.apostados / quiniela.total) * 100 : 0;
 
   return (
-    <div className="space-y-5">
+    <div className="animate-rise-in space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-800">Administración</h1>
-        <button onClick={salir} className="text-sm text-slate-500 hover:text-slate-700">
+        <h1 className="text-2xl font-black text-white">Administración</h1>
+        <button
+          onClick={salir}
+          className="text-sm font-medium text-slate-400 transition hover:text-cesped-300"
+        >
           Salir
         </button>
       </div>
 
       {/* Acciones principales */}
-      <section className="card p-5">
-        {!quiniela ? (
-          <div className="space-y-4">
-            <div>
-              <h2 className="font-semibold text-slate-800">Iniciar la jornada</h2>
-              <p className="text-sm text-slate-500">
-                Carga automáticamente la jornada actual de La Quiniela desde la web
-                oficial de SELAE. Si la fuente falla, podrás introducir los 15
-                partidos a mano.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => iniciar(false)}
-                disabled={iniciando}
-                className="btn-primary"
-              >
-                {iniciando ? 'Cargando…' : '▶ Iniciar (automático desde SELAE)'}
-              </button>
-              <button
-                onClick={() => setModoManual((v) => !v)}
-                className="btn-secondary"
-              >
-                {modoManual ? 'Ocultar formulario manual' : 'Introducir a mano'}
-              </button>
-            </div>
-
-            {modoManual && (
-              <div className="mt-2 border-t border-slate-100 pt-4">
-                <FormularioManual onEnviar={(d) => crearManual(d)} enviando={iniciando} />
-              </div>
-            )}
+      {!quiniela ? (
+        <section className="card space-y-5 p-6">
+          <div>
+            <h2 className="text-lg font-black text-white">Iniciar la jornada</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Carga automáticamente la jornada actual de La Quiniela. Si la fuente falla,
+              podrás introducir los 15 partidos a mano.
+            </p>
           </div>
-        ) : (
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-3">
+            <button onClick={() => iniciar(false)} disabled={iniciando} className="btn-primary">
+              {iniciando ? 'Cargando…' : '▶ Iniciar (automático)'}
+            </button>
+            <button onClick={() => setModoManual((v) => !v)} className="btn-ghost">
+              {modoManual ? 'Ocultar formulario manual' : 'Introducir a mano'}
+            </button>
+          </div>
+
+          {modoManual && (
+            <div className="border-t border-white/10 pt-5">
+              <FormularioManual onEnviar={(d) => crearManual(d)} enviando={iniciando} />
+            </div>
+          )}
+        </section>
+      ) : (
+        <header className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-noche-700 to-noche-950 p-6 shadow-2xl">
+          <div className="pointer-events-none absolute inset-x-0 -top-24 h-48 bg-cesped-500/20 blur-3xl" />
+
+          <div className="relative flex flex-wrap items-start justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="font-semibold text-slate-800">{quiniela.jornada}</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl font-black text-white">{quiniela.jornada}</h2>
                 <span
                   className={`badge ${
                     cerrada
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : 'bg-amber-100 text-amber-700'
+                      ? 'bg-oro-400/15 text-oro-300 ring-oro-400/30'
+                      : 'bg-cesped-400/15 text-cesped-300 ring-cesped-400/30'
                   }`}
                 >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      cerrada ? 'bg-oro-400' : 'animate-pulse-dot bg-cesped-400'
+                    }`}
+                  />
                   {quiniela.estado}
                 </span>
-                <span className="badge bg-slate-100 text-slate-500">
+                <span className="badge bg-white/[0.06] text-slate-400 ring-white/10">
                   {quiniela.origen === 'AUTOMATICO' ? 'auto' : 'manual'}
                 </span>
               </div>
-              <p className="mt-0.5 text-sm text-slate-500">
-                {quiniela.apostados} de {quiniela.total} partidos apostados
+              <p className="mt-1.5 text-sm text-slate-400">
+                <span className="font-bold text-cesped-300">{quiniela.apostados}</span> de{' '}
+                {quiniela.total} partidos apostados
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {cerrada && <BotonImprimir />}
               <button onClick={reiniciar} className="btn-danger">
                 Reiniciar
               </button>
             </div>
           </div>
-        )}
-      </section>
+
+          {!cerrada && (
+            <div className="relative mt-5 h-2.5 w-full overflow-hidden rounded-full bg-white/[0.07]">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-cesped-500 to-cesped-300 transition-[width] duration-500"
+                style={{ width: `${progreso}%` }}
+              />
+            </div>
+          )}
+        </header>
+      )}
 
       {/* Tabla de seguimiento */}
       {quiniela && (
         <section className="card overflow-hidden">
-          <div className="border-b border-slate-100 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="border-b border-white/10 px-4 py-3 text-xs font-bold uppercase tracking-wide text-slate-400">
             Seguimiento de los 15 partidos
           </div>
-          <div className="divide-y divide-slate-100">
+          <div>
             {quiniela.partidos.map((p) => (
               <PartidoAdminFila
                 key={p.numero}
@@ -383,30 +405,41 @@ function PartidoAdminFila({
       await navigator.clipboard.writeText(texto);
       onToast({ tipo: 'exito', texto: 'Enlace copiado al portapapeles.' });
     } catch {
-      onToast({ tipo: 'info', texto: texto });
+      onToast({ tipo: 'info', texto });
     }
   }
 
   const apostado = partido.estado === 'APOSTADO';
 
   return (
-    <div className="px-4 py-3">
+    <div className="border-b border-white/5 px-4 py-3 transition last:border-0 hover:bg-white/[0.02]">
       <div className="flex items-center gap-3">
         <span
-          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-            partido.esPleno ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
+          className={`flex h-8 w-8 flex-none items-center justify-center rounded-full text-xs font-black tabular-nums ring-1 ${
+            partido.esPleno
+              ? 'bg-oro-400/15 text-oro-300 ring-oro-400/30'
+              : 'bg-white/[0.06] text-slate-300 ring-white/10'
           }`}
         >
           {partido.numero}
         </span>
+
+        <div className="hidden sm:flex sm:items-center sm:gap-1.5">
+          <Escudo nombre={partido.local} size={28} />
+          <Escudo nombre={partido.visitante} size={28} />
+        </div>
+
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-slate-800">
-            {partido.local} <span className="text-slate-400">–</span> {partido.visitante}
+          <div className="truncate text-sm font-bold text-white">
+            {partido.local} <span className="font-normal text-slate-500">–</span>{' '}
+            {partido.visitante}
             {partido.esPleno && (
-              <span className="ml-2 text-[11px] font-medium text-amber-600">Pleno 15</span>
+              <span className="ml-2 text-[11px] font-bold uppercase tracking-wide text-oro-300">
+                Pleno 15
+              </span>
             )}
           </div>
-          <div className="text-[11px] text-slate-400">
+          <div className="text-[11px] text-slate-500">
             {partido.multiplicidad
               ? `Multiplicidad: ${partido.multiplicidad.toLowerCase()}`
               : 'Sin invitación aún'}
@@ -414,9 +447,9 @@ function PartidoAdminFila({
         </div>
 
         {apostado ? (
-          <div className="flex flex-col items-end gap-1">
-            {partido.signos && (
-              partido.signos.tipo === '1X2' ? (
+          <div className="flex flex-col items-end gap-1.5">
+            {partido.signos &&
+              (partido.signos.tipo === '1X2' ? (
                 <CasillasSignos
                   opciones={SIGNOS_1X2}
                   seleccion={partido.signos.valores}
@@ -425,13 +458,24 @@ function PartidoAdminFila({
                   size="sm"
                 />
               ) : (
-                <div className="flex flex-col gap-0.5">
-                  <CasillasSignos opciones={VALORES_PLENO} seleccion={partido.signos.local} max={3} readOnly size="sm" />
-                  <CasillasSignos opciones={VALORES_PLENO} seleccion={partido.signos.visitante} max={3} readOnly size="sm" />
+                <div className="flex flex-col gap-1">
+                  <CasillasSignos
+                    opciones={VALORES_PLENO}
+                    seleccion={partido.signos.local}
+                    max={3}
+                    readOnly
+                    size="sm"
+                  />
+                  <CasillasSignos
+                    opciones={VALORES_PLENO}
+                    seleccion={partido.signos.visitante}
+                    max={3}
+                    readOnly
+                    size="sm"
+                  />
                 </div>
-              )
-            )}
-            <span className="text-[11px] text-emerald-600">
+              ))}
+            <span className="text-[11px] font-medium text-cesped-300">
               {partido.nombreJugador}
             </span>
           </div>
@@ -439,7 +483,7 @@ function PartidoAdminFila({
           !bloqueado && (
             <button
               onClick={() => setAbierto((v) => !v)}
-              className="btn-secondary py-1 text-xs"
+              className="btn-ghost px-3 py-1.5 text-xs"
             >
               Invitar
             </button>
@@ -449,7 +493,7 @@ function PartidoAdminFila({
 
       {/* Invitaciones emitidas */}
       {partido.invitaciones.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5 pl-10">
+        <div className="mt-2.5 flex flex-wrap gap-1.5 sm:pl-[4.75rem]">
           {partido.invitaciones.map((inv) => (
             <span
               key={inv.id}
@@ -464,16 +508,18 @@ function PartidoAdminFila({
 
       {/* Formulario de nueva invitación */}
       {abierto && !apostado && !bloqueado && (
-        <div className="mt-3 space-y-2 rounded-lg bg-slate-50 p-3 pl-10">
+        <div className="mt-3 animate-rise-in space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:ml-[4.75rem]">
           <div className="flex flex-wrap gap-2">
             <input
               className="input flex-1"
               placeholder="Nombre del jugador"
+              aria-label="Nombre del jugador"
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
             />
             <select
               className="input w-auto"
+              aria-label="Multiplicidad"
               value={mult}
               onChange={(e) => setMult(e.target.value as Mult)}
             >
@@ -486,9 +532,14 @@ function PartidoAdminFila({
             </button>
           </div>
           {enlace && (
-            <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5">
-              <input readOnly value={enlace} className="flex-1 bg-transparent text-xs text-slate-600 outline-none" />
-              <button onClick={() => copiar(enlace)} className="btn-secondary py-1 text-xs">
+            <div className="flex items-center gap-2 rounded-xl border border-cesped-400/30 bg-cesped-400/[0.08] px-3 py-2">
+              <input
+                readOnly
+                value={enlace}
+                aria-label="Enlace de invitación"
+                className="flex-1 bg-transparent font-mono text-xs text-cesped-200 outline-none"
+              />
+              <button onClick={() => copiar(enlace)} className="btn-ghost px-3 py-1.5 text-xs">
                 Copiar
               </button>
             </div>
