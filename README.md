@@ -197,69 +197,110 @@ Luego aplica las migraciones: `npx prisma migrate deploy`.
 
 ## Fuente de datos de la jornada
 
-La carga automática usa los **endpoints JSON no documentados** que la propia web
-de SELAE (`www.loteriasyapuestas.es`) utiliza. Todo se hace **en el servidor**
-(route handler / script), nunca desde el navegador (evita CORS y no expone
-nada), enviando cabeceras de navegador (`User-Agent`, `Accept`, `Referer`),
-porque el servidor rechaza peticiones sin ellas.
+La carga automática combina **dos fuentes**, porque ninguna por sí sola sirve.
+Todo se hace **en el servidor** (route handler / script), nunca desde el
+navegador (evita CORS y no expone nada), enviando cabeceras de navegador
+(`User-Agent`, `Accept`, `Referer`).
 
-Implementado en [`src/lib/jornadaFetcher.ts`](src/lib/jornadaFetcher.ts):
+### 1. Cabecera de la jornada → SELAE
 
-1. **`GET /servicios/proximosv3?game_id=LAQU&num=1`** — devuelve la **cabecera**
-   de la próxima jornada abierta: número de jornada, año, fecha de cierre,
-   fecha de sorteo e `id_sorteo`. **No incluye los emparejamientos.**
-2. **`GET /servicios/buscadorSorteos?game_id=LAQU&celebrados=<bool>&fechaInicioInclusiva=AAAAMMDD&fechaFinInclusiva=AAAAMMDD`**
-   — devuelve los sorteos de un rango de fechas, cada uno con su lista
-   **`partidos`** (15 objetos con `posicion`, `local`, `visitante`, `signo`…).
-   Es la fuente de los 15 emparejamientos. **Las fechas son de 8 dígitos
-   (`AAAAMMDD`), sin hora.**
+**`GET https://www.loteriasyapuestas.es/servicios/proximosv3?game_id=LAQU&num=1`**
 
-El módulo obtiene la cabecera, busca en `buscadorSorteos` una ventana alrededor
-de la fecha del sorteo, localiza el sorteo por su `id_sorteo`, extrae y
-**normaliza** los 15 partidos y **valida con Zod que hay exactamente 15** antes
-de crear nada. Incluye un pequeño **caché en memoria de 10 minutos** para no
-repetir la petición si se pulsa "Iniciar" varias veces.
+Endpoint JSON **no documentado** que usa la propia web de SELAE. Devuelve la
+**cabecera** de la próxima jornada abierta: número de jornada, año, fecha de
+cierre, fecha de sorteo e `id_sorteo`. **No incluye los emparejamientos.**
+
+### 2. Los 15 partidos → Mundo Deportivo
+
+**`GET https://www.mundodeportivo.com/servicios/quiniela`**
+
+> **Por qué no SELAE.** Se comprobó con peticiones reales que los endpoints de
+> SELAE **no publican los emparejamientos de la jornada abierta**:
+> `proximosv3` solo trae la cabecera, y `buscadorSorteos` únicamente devuelve
+> jornadas **ya celebradas**. Mundo Deportivo sí publica el **boleto vigente**,
+> así que de ahí salen los 15 partidos.
+
+La página **no es una API legible por máquina**, así que el parser
+([`src/lib/mundoDeportivo.ts`](src/lib/mundoDeportivo.ts)) es deliberadamente
+defensivo. La estructura real tiene **dos bloques** y la posición del partido
+aparece de formas distintas en cada uno:
+
+```
+Bloque 1 (tabla compacta) — la posición va en la línea SIGUIENTE:
+    "ESPAÑA - BÉLGICA"
+    "1"                     ← este bloque omite el Pleno al 15
+
+Bloque 2 (fichas detalladas) — la posición va en la línea ANTERIOR, con punto:
+    "15."
+    "SARPSBORG - VIKING"    ← aquí sí aparece el Pleno al 15
+```
+
+Por eso la posición se busca en este orden: **misma línea → línea anterior con
+punto (`"15."`) → línea siguiente numérica → vecindad ampliada**. Buscar hacia
+delante sin más daría falsos positivos, porque los botones `1 / X / 2` y los
+porcentajes también son números sueltos.
+
+Además el parser: deduplica por posición y por pareja de equipos (los dos
+bloques repiten partidos), **sanea los nombres de equipo** (elimina caracteres
+de control y `<`/`>`, colapsa espacios y limita la longitud, ya que ese texto
+acaba en la BD, la UI y el PDF) y **valida con Zod que hay exactamente 15
+partidos numerados del 1 al 15** antes de crear nada.
+
+### 3. Respaldo → SELAE `buscadorSorteos`
+
+**`GET /servicios/buscadorSorteos?game_id=LAQU&celebrados=<bool>&fechaInicioInclusiva=AAAAMMDD&fechaFinInclusiva=AAAAMMDD`**
+
+Devuelve los sorteos de un rango de fechas, cada uno con su lista `partidos`
+(objetos con `posicion`, `local`, `visitante`, `signo`…). Se usa si Mundo
+Deportivo falla. **Las fechas son de 8 dígitos (`AAAAMMDD`), sin hora.** Solo
+sirve para jornadas ya celebradas.
+
+La orquestación vive en
+[`src/lib/jornadaFetcher.ts`](src/lib/jornadaFetcher.ts) e incluye un **caché en
+memoria de 10 minutos** para no repetir la petición si se pulsa "Iniciar" varias
+veces.
 
 ### Limitaciones (importante) y fallback manual
 
-- Estos endpoints **no están documentados oficialmente** y su estructura **puede
-  cambiar** sin aviso. El parser es defensivo (busca varias claves alternativas)
-  y validado, pero podría dejar de funcionar si SELAE cambia el formato.
-- **`buscadorSorteos` solo expone jornadas cuyos partidos ya están publicados**
-  (típicamente jornadas celebradas o muy próximas). Si la jornada **abierta** aún
-  no tiene sus partidos publicados, la carga automática devolverá un error
-  claro (**502**) indicando que uses el formulario manual.
-- La protección **Akamai** del sitio puede responder **403** a peticiones
-  automatizadas según el cliente y la IP de origen. En las pruebas, el `fetch`
-  de **Node.js** (con cabeceras de navegador) atraviesa la protección; algunos
-  clientes como `curl` reciben 403. Desde IPs de datacenter (p. ej. Vercel) el
-  comportamiento puede variar.
+- Ninguna de las dos fuentes es una **API oficial documentada**: su estructura
+  **puede cambiar sin aviso**. Los parsers son defensivos y validados, pero
+  podrían dejar de funcionar.
+- Mundo Deportivo puede publicar solo los 14 partidos y **omitir el Pleno al
+  15** hasta más cerca de la jornada. En ese caso la carga automática devuelve
+  un error claro (**502**) pidiendo usar el formulario manual.
+- La protección **Akamai** de SELAE puede responder **403** a peticiones
+  automatizadas según el cliente y la IP. En las pruebas, el `fetch` de
+  **Node.js** (con cabeceras de navegador) atraviesa la protección; `curl`
+  recibe 403. Desde IPs de datacenter (p. ej. Vercel) puede variar. Como la
+  cabecera de SELAE es **best-effort**, si falla se sigue adelante con los
+  partidos de Mundo Deportivo.
 
-Por todo lo anterior, **la app nunca depende exclusivamente de la fuente
+Por todo lo anterior, **la app nunca depende exclusivamente de una fuente
 externa**: el botón _"Iniciar"_ siempre ofrece el **formulario manual** para
 introducir los 15 partidos a mano si la carga automática falla.
 
 ### Ejemplo real de `npm run fetch:jornada`
 
-El script intenta la jornada abierta y, si sus partidos aún no están publicados,
-demuestra el parser con la última jornada disponible:
-
 ```
-→ Consultando la jornada ABIERTA de La Quiniela en SELAE…
+→ Consultando la jornada ABIERTA de La Quiniela…
+  (cabecera: SELAE proximosv3 · partidos: Mundo Deportivo)
 
-⚠️  No se pudieron obtener los partidos de la jornada abierta.
-   Motivo: Los partidos de la jornada abierta aún no están publicados en SELAE.
-   (Cabecera SÍ accesible: jornada 72, año 2026, cierre 2026-07-10T16:00:00.000Z)
+✅ Jornada abierta obtenida con sus 15 partidos:
 
-→ Demostrando el parser con la última jornada disponible en SELAE…
-✅ 15 partidos reales obtenidos y parseados correctamente:
+   Jornada 72 - 2026  (abierta a apuestas)
+   Fuente de los partidos: Mundo Deportivo
+   Cierre:   10/7/2026, 18:00:00
+   idSorteo: 1316106041
 
-   Jornada 71 - 2026  (jornada ya celebrada)
    Nº  Local                      Visitante
-    1  Portugal                   Croacia
-    2  Suiza                      Argelia
+   ──  ─────────────────────────  ─────────────────────────
+    1  España                     Bélgica
+    2  Noruega                    Inglaterra
+    3  Argentina                  Suiza
    ...
-   15  Elfsborg                   Hammarby     ← Pleno al 15
+   14  Brann                      Ik Start
+   15  Sarpsborg                  Viking       ← Pleno al 15
+
    Total: 15 partidos.
 ```
 
@@ -371,7 +412,10 @@ quiniporra/
 │   │   ├── apostar/[token]/page.tsx
 │   │   └── api/…                  # route handlers
 │   ├── components/                # FilaPartido, CasillasSignos, FormularioManual, Toast…
-│   └── lib/                       # prisma, auth, validation, tokens, cache, quiniela, jornadaFetcher, pdf, http
+│   └── lib/
+│       ├── jornadaFetcher.ts      # orquesta cabecera (SELAE) + partidos
+│       ├── mundoDeportivo.ts      # scraper del boleto vigente (15 partidos)
+│       └── …                      # prisma, auth, validation, tokens, cache, quiniela, pdf, http, errors
 ├── .env.example
 └── package.json
 ```

@@ -1,33 +1,34 @@
 import { z } from 'zod';
 import { cacheGet, cacheSet, TTL_JORNADA_MS } from './cache';
+import { JornadaFetchError } from './errors';
+import { obtenerPartidosMundoDeportivo } from './mundoDeportivo';
+
+// Se reexporta para no romper a quien lo importaba desde aquí.
+export { JornadaFetchError };
 
 /**
- * Obtención automática de la jornada actual de La Quiniela desde la web
- * oficial de Loterías y Apuestas del Estado (SELAE).
+ * Obtención automática de la jornada actual de La Quiniela.
  *
- * ESTRUCTURA REAL DE LOS ENDPOINTS (inspeccionada en desarrollo, 2026-07):
+ * ARQUITECTURA DE FUENTES (comprobada con peticiones reales, 2026-07):
  *
- *  - GET /servicios/proximosv3?game_id=LAQU&num=N
- *      Devuelve un array con la CABECERA de los próximos sorteos (jornada
- *      abierta a apuestas): { fecha, cierre, id_sorteo, anyo, jornada, ... }.
- *      NO incluye los emparejamientos.
+ *  1. CABECERA — SELAE, `GET /servicios/proximosv3?game_id=LAQU&num=1`
+ *     Devuelve el número de jornada, año, fecha de cierre y `id_sorteo` de la
+ *     próxima jornada abierta a apuestas. NO incluye los emparejamientos.
  *
- *  - GET /servicios/buscadorSorteos?game_id=LAQU&celebrados=<bool>
- *        &fechaInicioInclusiva=AAAAMMDD&fechaFinInclusiva=AAAAMMDD
- *      IMPORTANTE: las fechas son de 8 dígitos (AAAAMMDD), no llevan hora.
- *      Devuelve un array de sorteos, cada uno con la lista `partidos` (15):
- *        { posicion, idLocal, local, idVisitante, visitante, signo, marcador, ... }
- *      Es la fuente de los 15 emparejamientos.
+ *  2. LOS 15 PARTIDOS — Mundo Deportivo (fuente primaria).
+ *     Los endpoints de SELAE NO publican los emparejamientos de la jornada
+ *     abierta: `buscadorSorteos` solo devuelve jornadas ya celebradas. Mundo
+ *     Deportivo sí publica el boleto vigente, así que de ahí salen los 15
+ *     partidos. Ver `src/lib/mundoDeportivo.ts`.
  *
- * LIMITACIÓN REAL: `buscadorSorteos` solo devuelve jornadas cuyos partidos ya
- * están publicados (habitualmente jornadas celebradas o muy próximas). Si la
- * jornada abierta aún no tiene sus partidos publicados, no se encuentran y el
- * flujo cae al FALLBACK MANUAL del panel de admin.
+ *  3. RESPALDO — SELAE, `GET /servicios/buscadorSorteos?...`
+ *     Útil cuando la jornada ya se celebró (o si Mundo Deportivo cambia).
+ *     Ojo: las fechas son de 8 dígitos (AAAAMMDD), sin hora.
  *
- * NOTA sobre bloqueos: estos endpoints exigen cabeceras de navegador
- * (User-Agent, Accept, Referer). El `fetch` de Node.js las envía y suele pasar
- * la protección Akamai; algunos clientes (p. ej. curl) pueden recibir 403.
- * La petición se hace SIEMPRE en servidor, nunca desde el navegador.
+ * Si nada funciona se lanza JornadaFetchError y el panel de admin ofrece el
+ * FALLBACK MANUAL. La app nunca depende en exclusiva de una fuente externa.
+ *
+ * Todas las peticiones se hacen en servidor, nunca desde el navegador.
  */
 
 const BASE = 'https://www.loteriasyapuestas.es/servicios';
@@ -44,19 +45,11 @@ const BROWSER_HEADERS: Record<string, string> = {
   'X-Requested-With': 'XMLHttpRequest',
 };
 
-export class JornadaFetchError extends Error {
-  constructor(
-    message: string,
-    public readonly detalle?: string,
-  ) {
-    super(message);
-    this.name = 'JornadaFetchError';
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Tipos de salida
 // ---------------------------------------------------------------------------
+
+export type FuentePartidos = 'MUNDO_DEPORTIVO' | 'SELAE';
 
 export interface PartidoJornada {
   numero: number; // 1..15
@@ -72,12 +65,9 @@ export interface JornadaObtenida {
   fechaSorteo: string | null; // ISO 8601
   idSorteo: string | null;
   celebrada: boolean; // true si los partidos vienen de una jornada ya celebrada
+  fuente: FuentePartidos;
   partidos: PartidoJornada[]; // exactamente 15
 }
-
-// ---------------------------------------------------------------------------
-// Validación estricta del resultado final
-// ---------------------------------------------------------------------------
 
 const jornadaValidada = z.object({
   jornada: z.string().min(1),
@@ -86,6 +76,7 @@ const jornadaValidada = z.object({
   fechaSorteo: z.string().nullable(),
   idSorteo: z.string().nullable(),
   celebrada: z.boolean(),
+  fuente: z.enum(['MUNDO_DEPORTIVO', 'SELAE']),
   partidos: z
     .array(
       z.object({
@@ -122,7 +113,7 @@ function aIso(v: unknown): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-/** Extrae "AAAAMMDD" de una fecha "2026-07-12 ..." sin desfase de zona horaria. */
+/** Extrae "AAAAMMDD" sin desfase de zona horaria. */
 function aYmd(fechaRaw: unknown): string | null {
   if (typeof fechaRaw !== 'string') return null;
   const m = fechaRaw.match(/(\d{4})-(\d{2})-(\d{2})/);
@@ -131,25 +122,19 @@ function aYmd(fechaRaw: unknown): string | null {
 
 /** Suma días a una fecha "AAAAMMDD" (aritmética en UTC). */
 function ymdMasDias(ymd: string, dias: number): string {
-  const y = Number(ymd.slice(0, 4));
-  const mo = Number(ymd.slice(4, 6));
-  const d = Number(ymd.slice(6, 8));
-  const fecha = new Date(Date.UTC(y, mo - 1, d));
+  const fecha = new Date(
+    Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(4, 6)) - 1, Number(ymd.slice(6, 8))),
+  );
   fecha.setUTCDate(fecha.getUTCDate() + dias);
-  const yy = fecha.getUTCFullYear();
   const mm = String(fecha.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(fecha.getUTCDate()).padStart(2, '0');
-  return `${yy}${mm}${dd}`;
+  return `${fecha.getUTCFullYear()}${mm}${dd}`;
 }
 
 async function pedirJson(url: string): Promise<unknown> {
   let res: Response;
   try {
-    res = await fetch(url, {
-      headers: BROWSER_HEADERS,
-      // Next 15: fetch ya no cachea por defecto; lo hacemos explícito.
-      cache: 'no-store',
-    });
+    res = await fetch(url, { headers: BROWSER_HEADERS, cache: 'no-store' });
   } catch (e) {
     throw new JornadaFetchError(
       'No se pudo conectar con la web de SELAE.',
@@ -172,7 +157,7 @@ async function pedirJson(url: string): Promise<unknown> {
       texto.slice(0, 200),
     );
   }
-  // Los endpoints devuelven un string cuando no hay datos o hay un error de parámetros.
+  // Estos endpoints devuelven un string cuando no hay datos o los parámetros fallan.
   if (typeof json === 'string') {
     throw new JornadaFetchError('SELAE no devolvió datos para la consulta.', json);
   }
@@ -180,7 +165,7 @@ async function pedirJson(url: string): Promise<unknown> {
 }
 
 // ---------------------------------------------------------------------------
-// Paso 1: cabecera del próximo sorteo (proximosv3)
+// Cabecera del próximo sorteo (SELAE, proximosv3)
 // ---------------------------------------------------------------------------
 
 export interface CabeceraSorteo {
@@ -197,9 +182,8 @@ function parseaCabecera(data: unknown): CabeceraSorteo {
   const primero = arr.find((x) => x && typeof x === 'object') as
     | Record<string, unknown>
     | undefined;
-  if (!primero) {
-    throw new JornadaFetchError('SELAE no devolvió ningún sorteo próximo.');
-  }
+  if (!primero) throw new JornadaFetchError('SELAE no devolvió ningún sorteo próximo.');
+
   const jornadaNum = primerCampo(primero, ['jornada', 'numeroJornada', 'numero']);
   const fechaRaw = primerCampo(primero, ['fecha', 'fecha_sorteo', 'fechaSorteo']);
   return {
@@ -219,19 +203,20 @@ function parseaCabecera(data: unknown): CabeceraSorteo {
   };
 }
 
+/** Solo la cabecera (diagnóstico y script de prueba). */
+export async function obtenerCabeceraJornada(): Promise<CabeceraSorteo> {
+  return parseaCabecera(await pedirJson(`${BASE}/proximosv3?game_id=LAQU&num=1`));
+}
+
 // ---------------------------------------------------------------------------
-// Paso 2: los 15 partidos (buscadorSorteos)
+// Partidos desde SELAE (respaldo; solo jornadas ya publicadas/celebradas)
 // ---------------------------------------------------------------------------
 
 const CLAVES_LOCAL = ['local', 'equipoLocal', 'equipo1', 'nombreLocal'];
 const CLAVES_VISITANTE = ['visitante', 'equipoVisitante', 'equipo2', 'nombreVisitante'];
 const CLAVES_ORDEN = ['posicion', 'orden', 'numero', 'num', 'idx'];
 
-/** Busca recursivamente un array que parezca la lista de partidos. */
-function buscaArrayPartidos(
-  nodo: unknown,
-  prof = 0,
-): Record<string, unknown>[] | null {
+function buscaArrayPartidos(nodo: unknown, prof = 0): Record<string, unknown>[] | null {
   if (prof > 6 || nodo === null || typeof nodo !== 'object') return null;
   if (Array.isArray(nodo)) {
     const objetos = nodo.filter(
@@ -261,8 +246,7 @@ function buscaArrayPartidos(
   return null;
 }
 
-/** Extrae y normaliza los 15 partidos de un objeto sorteo de buscadorSorteos. */
-function extraePartidos(sorteo: Record<string, unknown>): PartidoJornada[] {
+function extraePartidosSelae(sorteo: Record<string, unknown>): PartidoJornada[] {
   const arr =
     Array.isArray(sorteo.partidos) &&
     (sorteo.partidos as unknown[]).every((p) => p && typeof p === 'object')
@@ -287,7 +271,6 @@ function extraePartidos(sorteo: Record<string, unknown>): PartidoJornada[] {
       numero,
       local: normalizaNombre(primerCampo(o, CLAVES_LOCAL)),
       visitante: normalizaNombre(primerCampo(o, CLAVES_VISITANTE)),
-      esPleno: false,
     };
   });
 
@@ -300,7 +283,6 @@ function extraePartidos(sorteo: Record<string, unknown>): PartidoJornada[] {
   }));
 }
 
-/** Consulta buscadorSorteos en un rango de fechas (AAAAMMDD). */
 async function buscarSorteos(
   ymdInicio: string,
   ymdFin: string,
@@ -314,59 +296,54 @@ async function buscarSorteos(
   return arr.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
 }
 
-// ---------------------------------------------------------------------------
-// Construcción del resultado
-// ---------------------------------------------------------------------------
+/** Intenta los partidos de la jornada de la cabecera vía SELAE (respaldo). */
+async function partidosDesdeSelae(cab: CabeceraSorteo): Promise<PartidoJornada[]> {
+  if (!cab.fechaSorteoYmd) {
+    throw new JornadaFetchError('SELAE no indicó la fecha del próximo sorteo.');
+  }
+  const inicio = ymdMasDias(cab.fechaSorteoYmd, -6);
+  const fin = ymdMasDias(cab.fechaSorteoYmd, 2);
 
-function construyeJornada(
-  cab: CabeceraSorteo,
-  sorteo: Record<string, unknown>,
-  celebrada: boolean,
-): JornadaObtenida {
-  const partidos = extraePartidos(sorteo);
-  const numero =
-    cab.numeroJornada ??
-    (typeof sorteo.jornada === 'number'
-      ? sorteo.jornada
-      : typeof sorteo.jornada === 'string' && /^\d+$/.test(sorteo.jornada)
-        ? parseInt(sorteo.jornada, 10)
-        : null);
-  const anyo =
-    cab.anyo ?? (typeof sorteo.anyo === 'string' ? sorteo.anyo : null);
+  let sorteos: Record<string, unknown>[] = [];
+  for (const celebrados of [false, true]) {
+    try {
+      const r = await buscarSorteos(inicio, fin, celebrados);
+      if (r.length) {
+        sorteos = r;
+        break;
+      }
+    } catch {
+      /* seguimos probando */
+    }
+  }
 
-  const resultado: JornadaObtenida = {
-    jornada:
-      numero != null
-        ? `Jornada ${numero}${anyo ? ` - ${anyo}` : ''}`
-        : `Jornada de La Quiniela${anyo ? ` - ${anyo}` : ''}`,
-    numeroJornada: numero,
-    fechaCierre: cab.fechaCierre,
-    fechaSorteo: cab.fechaSorteo ?? aIso(sorteo.fecha_sorteo),
-    idSorteo:
-      cab.idSorteo ??
-      (sorteo.id_sorteo != null ? String(sorteo.id_sorteo) : null),
-    celebrada,
-    partidos,
-  };
+  const objetivo =
+    sorteos.find((s) => cab.idSorteo && String(s.id_sorteo) === cab.idSorteo) ??
+    sorteos.find((s) => Array.isArray(s.partidos) && (s.partidos as unknown[]).length >= 14);
 
-  const parsed = jornadaValidada.safeParse(resultado);
-  if (!parsed.success) {
+  if (!objetivo) {
     throw new JornadaFetchError(
-      'Los datos obtenidos de SELAE no superaron la validación.',
-      parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      'SELAE no publica todavía los partidos de la jornada abierta.',
     );
   }
-  return parsed.data;
+  return extraePartidosSelae(objetivo);
 }
 
 // ---------------------------------------------------------------------------
-// API pública del módulo
+// Orquestación
 // ---------------------------------------------------------------------------
 
+function nombreJornada(cab: CabeceraSorteo | null): string {
+  if (cab?.numeroJornada != null) {
+    return `Jornada ${cab.numeroJornada}${cab.anyo ? ` - ${cab.anyo}` : ''}`;
+  }
+  return 'Jornada actual de La Quiniela';
+}
+
 /**
- * Obtiene la jornada actual (la próxima abierta a apuestas) de La Quiniela.
- * Lanza JornadaFetchError si la fuente falla o los partidos aún no están
- * publicados (en ese caso, el flujo debe usar el fallback manual).
+ * Obtiene la jornada actual (la próxima abierta a apuestas) con sus 15 partidos.
+ * Lanza JornadaFetchError si ninguna fuente responde: entonces toca el
+ * formulario manual del panel de admin.
  */
 export async function obtenerJornadaActual(
   opts: { usarCache?: boolean } = {},
@@ -378,68 +355,78 @@ export async function obtenerJornadaActual(
     if (cacheada) return cacheada;
   }
 
-  // Paso 1: cabecera de la próxima jornada abierta.
-  const cab = parseaCabecera(await pedirJson(`${BASE}/proximosv3?game_id=LAQU&num=1`));
-
-  if (!cab.fechaSorteoYmd) {
-    throw new JornadaFetchError('SELAE no indicó la fecha del próximo sorteo.');
+  // 1) Cabecera de SELAE: mejor esfuerzo, no es bloqueante.
+  let cab: CabeceraSorteo | null = null;
+  let errorCabecera: string | null = null;
+  try {
+    cab = await obtenerCabeceraJornada();
+  } catch (e) {
+    errorCabecera = e instanceof JornadaFetchError ? e.message : String(e);
   }
 
-  // Paso 2: buscar los partidos de esa jornada en una ventana alrededor de su fecha.
-  const inicio = ymdMasDias(cab.fechaSorteoYmd, -6);
-  const fin = ymdMasDias(cab.fechaSorteoYmd, 2);
-
+  // 2) Partidos: Mundo Deportivo (primaria) -> SELAE (respaldo).
   const errores: string[] = [];
-  let sorteos: Record<string, unknown>[] = [];
-  for (const celebrados of [false, true]) {
+  let partidos: PartidoJornada[] | null = null;
+  let fuente: FuentePartidos = 'MUNDO_DEPORTIVO';
+  let celebrada = false;
+
+  try {
+    partidos = await obtenerPartidosMundoDeportivo();
+  } catch (e) {
+    errores.push(
+      `Mundo Deportivo: ${e instanceof JornadaFetchError ? e.message : String(e)}`,
+    );
+  }
+
+  if (!partidos && cab) {
     try {
-      const r = await buscarSorteos(inicio, fin, celebrados);
-      if (r.length) {
-        sorteos = r;
-        break;
-      }
+      partidos = await partidosDesdeSelae(cab);
+      fuente = 'SELAE';
+      celebrada = true;
     } catch (e) {
-      errores.push(e instanceof JornadaFetchError ? e.message : String(e));
+      errores.push(`SELAE: ${e instanceof JornadaFetchError ? e.message : String(e)}`);
     }
   }
 
-  // Preferimos el sorteo cuyo id_sorteo coincide con el de la cabecera.
-  const objetivo =
-    sorteos.find((s) => cab.idSorteo && String(s.id_sorteo) === cab.idSorteo) ??
-    sorteos.find(
-      (s) => Array.isArray(s.partidos) && (s.partidos as unknown[]).length >= 14,
-    );
-
-  if (!objetivo) {
+  if (!partidos) {
+    if (errorCabecera) errores.push(`Cabecera SELAE: ${errorCabecera}`);
     throw new JornadaFetchError(
-      'Los partidos de la jornada abierta aún no están publicados en SELAE.',
-      `Cabecera obtenida (jornada ${cab.numeroJornada}, cierre ${cab.fechaCierre}), ` +
-        `pero buscadorSorteos no devolvió sus 15 partidos. ${errores.join(' | ')} ` +
-        'Usa el formulario manual del panel de administración.',
+      'No se pudieron obtener los 15 partidos de la jornada.',
+      `${errores.join(' | ')}. Usa el formulario manual del panel de administración.`,
     );
   }
 
-  const resultado = construyeJornada(cab, objetivo, false);
-  cacheSet(CLAVE, resultado, TTL_JORNADA_MS);
-  return resultado;
-}
+  const resultado: JornadaObtenida = {
+    jornada: nombreJornada(cab),
+    numeroJornada: cab?.numeroJornada ?? null,
+    fechaCierre: cab?.fechaCierre ?? null,
+    fechaSorteo: cab?.fechaSorteo ?? null,
+    idSorteo: cab?.idSorteo ?? null,
+    celebrada,
+    fuente,
+    partidos,
+  };
 
-/** Solo la cabecera (diagnóstico y script de prueba). */
-export async function obtenerCabeceraJornada(): Promise<CabeceraSorteo> {
-  return parseaCabecera(await pedirJson(`${BASE}/proximosv3?game_id=LAQU&num=1`));
+  const parsed = jornadaValidada.safeParse(resultado);
+  if (!parsed.success) {
+    throw new JornadaFetchError(
+      'Los datos obtenidos no superaron la validación.',
+      parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+    );
+  }
+
+  cacheSet(CLAVE, parsed.data, TTL_JORNADA_MS);
+  return parsed.data;
 }
 
 /**
- * Obtiene la última jornada disponible en SELAE con sus 15 partidos (busca
- * hacia atrás por rangos de fechas). Se usa en el script de prueba para
- * demostrar el parser con datos reales aunque la jornada abierta todavía no
- * tenga partidos publicados.
+ * Última jornada disponible en SELAE con sus 15 partidos (retrocede por
+ * ventanas de fechas). Se usa como diagnóstico en el script de prueba.
  */
 export async function obtenerUltimaJornadaConPartidos(
   hoyYmd: string,
 ): Promise<JornadaObtenida> {
   const errores: string[] = [];
-  // Retrocede en ventanas de ~20 días hasta encontrar sorteos con partidos.
   for (let i = 0; i < 6; i++) {
     const fin = ymdMasDias(hoyYmd, -i * 20);
     const inicio = ymdMasDias(fin, -25);
@@ -452,20 +439,24 @@ export async function obtenerUltimaJornadaConPartidos(
         );
       if (conPartidos.length) {
         const s = conPartidos[0];
-        const cabFalsa: CabeceraSorteo = {
-          numeroJornada:
-            typeof s.jornada === 'number'
-              ? s.jornada
-              : typeof s.jornada === 'string' && /^\d+$/.test(s.jornada)
-                ? parseInt(s.jornada, 10)
-                : null,
-          anyo: typeof s.anyo === 'string' ? s.anyo : null,
+        const numero =
+          typeof s.jornada === 'number'
+            ? s.jornada
+            : typeof s.jornada === 'string' && /^\d+$/.test(s.jornada)
+              ? parseInt(s.jornada, 10)
+              : null;
+        const anyo = typeof s.anyo === 'string' ? s.anyo : null;
+        const resultado: JornadaObtenida = {
+          jornada: numero != null ? `Jornada ${numero}${anyo ? ` - ${anyo}` : ''}` : 'Jornada',
+          numeroJornada: numero,
           fechaCierre: null,
           fechaSorteo: aIso(s.fecha_sorteo),
-          fechaSorteoYmd: aYmd(s.fecha_sorteo),
           idSorteo: s.id_sorteo != null ? String(s.id_sorteo) : null,
+          celebrada: true,
+          fuente: 'SELAE',
+          partidos: extraePartidosSelae(s),
         };
-        return construyeJornada(cabFalsa, s, true);
+        return jornadaValidada.parse(resultado);
       }
     } catch (e) {
       errores.push(e instanceof JornadaFetchError ? e.message : String(e));

@@ -21,8 +21,14 @@ import {
   type JornadaObtenida,
 } from '../src/lib/jornadaFetcher';
 
+const NOMBRE_FUENTE: Record<string, string> = {
+  MUNDO_DEPORTIVO: 'Mundo Deportivo',
+  SELAE: 'SELAE (buscadorSorteos)',
+};
+
 function imprimeJornada(j: JornadaObtenida) {
   console.log(`   ${j.jornada}${j.celebrada ? '  (jornada ya celebrada)' : '  (abierta a apuestas)'}`);
+  console.log(`   Fuente de los partidos: ${NOMBRE_FUENTE[j.fuente] ?? j.fuente}`);
   if (j.fechaCierre)
     console.log(`   Cierre:   ${new Date(j.fechaCierre).toLocaleString('es-ES')}`);
   if (j.fechaSorteo)
@@ -47,7 +53,10 @@ function hoyYmd(): string {
 }
 
 async function main() {
-  console.log('→ Consultando la jornada ABIERTA de La Quiniela en SELAE…\n');
+  console.log(
+    '→ Consultando la jornada ABIERTA de La Quiniela…\n' +
+      '  (cabecera: SELAE proximosv3 · partidos: Mundo Deportivo)\n',
+  );
 
   try {
     const jornada = await obtenerJornadaActual({ usarCache: false });

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ZodError } from 'zod';
 import { AdminAuthError } from './auth';
-import { JornadaFetchError } from './jornadaFetcher';
+import { JornadaFetchError } from './errors';
 
 /** Respuesta JSON de éxito. */
 export function ok<T>(data: T, status = 200): NextResponse {
