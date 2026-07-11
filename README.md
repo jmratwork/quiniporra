@@ -141,14 +141,41 @@ npm run totp:setup
 Verás tres cosas:
 
 1. Un **código QR** → escanéalo con tu app de autenticación (o teclea el secreto
-   a mano si no puedes escanear).
-2. El valor **`TOTP_SECRET="…"`** (base32) → cópialo a la variable de entorno.
-3. El **código de 6 dígitos** actual, para comprobar que la app y el secreto
-   coinciden (debe salir el mismo en tu app).
+   a mano si no puedes escanear). Al hacerlo, la app crea una entrada para
+   quiniporra y empieza a mostrar un código de 6 dígitos que cambia cada 30 s.
+2. El valor **`TOTP_SECRET="…"`** (base32) → cópialo a la variable de entorno
+   (`.env` en local, *Environment Variables* en Vercel).
+3. Un **código de 6 dígitos** que imprime el propio script.
 
-> El `TOTP_SECRET` debe ser **el mismo** que escaneaste en la app. Si usas
-> valores distintos en local y en producción, tendrás que escanear los dos
-> (o reutilizar el mismo secreto en ambos entornos).
+**Cómo funciona el segundo factor (y por qué importa el paso 3).** Un código
+TOTP no se envía por ningún sitio: la app de tu móvil y el servidor lo
+**calculan por separado** a partir del *mismo* secreto y de la hora actual. Si
+ambos parten del mismo `TOTP_SECRET`, generan el mismo número de 6 dígitos en
+cada intervalo de 30 s; al iniciar sesión, el servidor comprueba que el código
+que tecleas coincide con el que él ha calculado.
+
+Por eso el paso 3 es una **verificación de que el enrolamiento salió bien**:
+abre tu app justo después de escanear y compara el código que muestra para
+quiniporra con el que imprimió el script. Como cambian cada 30 s, míralos casi a
+la vez.
+
+- **Coinciden** → la app y el servidor comparten el secreto: el 2FA está listo.
+- **No coinciden** → escaneaste mal, tecleaste mal el secreto o el reloj del
+  móvil está desajustado. Repite el enrolamiento (`npm run totp:setup`) o activa
+  la hora automática en el móvil.
+
+> **El `TOTP_SECRET` de la variable de entorno debe ser el mismo que conoce tu
+> app.** Local y producción (Vercel) son entornos separados, cada uno con su
+> propia variable `TOTP_SECRET`, así que tienes dos opciones:
+>
+> - **Reutilizar el mismo secreto** en local y en producción → te vale con una
+>   sola entrada en la app (lo más cómodo).
+> - **Usar un secreto distinto en cada entorno** (más aislamiento) → tendrás que
+>   escanear el QR **dos veces**, y en tu app quedarán dos entradas (p. ej.
+>   "quiniporra local" y "quiniporra prod"), cada una con su código.
+>
+> Si generas un `TOTP_SECRET` nuevo (rotación) y no vuelves a escanearlo en la
+> app, los códigos dejarán de coincidir y no podrás entrar.
 >
 > En **desarrollo**, si dejas `TOTP_SECRET` vacío, se **omite** el segundo
 > factor (solo se pide el PIN) para no bloquear el arranque local. En
