@@ -245,16 +245,6 @@ export default function AdminPage() {
           >
             {cargando ? 'Comprobando…' : enPaso1 ? 'Continuar' : 'Entrar'}
           </button>
-
-          {!enPaso1 && (
-            <button
-              type="button"
-              onClick={reiniciarLogin}
-              className="w-full text-center text-xs font-medium text-slate-400 transition hover:text-cesped-300"
-            >
-              ← Volver a introducir el PIN
-            </button>
-          )}
         </form>
         <Toast mensaje={toast} onClose={() => setToast(null)} />
       </div>
