@@ -599,6 +599,6 @@ quiniporra/
 | `npm run fetch:jornada`  | Prueba real del fetcher de la jornada.                        |
 | `npm run totp:setup`     | Genera el secreto y el QR del doble factor (2FA).             |
 
-## Licencia
+## Nota
 
-Software libre. Solo dependencias open source y gratuitas.
+Este README está escrito en español debido a los potenciales usuarios que tienen la aplicación.
