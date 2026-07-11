@@ -97,19 +97,69 @@ cp .env.example .env
 | `SESSION_SECRET`    | Secreto HMAC para firmar la cookie de sesión del admin. **Oblig. en prod.**    |
 | `TOTP_SECRET`       | Secreto base32 del segundo factor (2FA). **Oblig. en prod.** Ver más abajo.     |
 
-Genera un secreto aleatorio (para `INVITACION_SECRET` y `SESSION_SECRET`):
+#### Cómo generar cada secreto
+
+Hay dos tipos de secreto y se generan de forma distinta.
+
+**A) `INVITACION_SECRET` y `SESSION_SECRET` — claves aleatorias del servidor**
+
+Son claves que solo usa el servidor para firmar (no las comparte nadie). Vale
+cualquier cadena aleatoria larga. Genera **una distinta para cada una**:
 
 ```bash
+# Ejecútalo dos veces y usa un valor para cada variable
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# → p. ej.  9f3c1a…e2b7   (64 caracteres hexadecimales)
 ```
 
-Genera el `TOTP_SECRET` del doble factor con:
+<details>
+<summary>Alternativas sin Node (PowerShell / OpenSSL)</summary>
+
+```powershell
+# Windows PowerShell
+[Convert]::ToHexString([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLower()
+```
 
 ```bash
-npm run totp:setup   # imprime un QR para escanear y el valor de TOTP_SECRET
+# Linux / macOS con OpenSSL
+openssl rand -hex 32
 ```
 
-Ver la sección [Seguridad del panel: doble factor (2FA)](#seguridad-del-panel-doble-factor-2fa).
+</details>
+
+**B) `TOTP_SECRET` — secreto del segundo factor (2FA)**
+
+Este **no** se genera "a lo bruto": tu app de autenticación (Google
+Authenticator, Authy, 1Password…) tiene que conocer el **mismo** secreto para
+producir los códigos correctos. Por eso hay un script que genera el secreto
+**y** el QR para escanearlo:
+
+```bash
+npm run totp:setup
+```
+
+Verás tres cosas:
+
+1. Un **código QR** → escanéalo con tu app de autenticación (o teclea el secreto
+   a mano si no puedes escanear).
+2. El valor **`TOTP_SECRET="…"`** (base32) → cópialo a la variable de entorno.
+3. El **código de 6 dígitos** actual, para comprobar que la app y el secreto
+   coinciden (debe salir el mismo en tu app).
+
+> El `TOTP_SECRET` debe ser **el mismo** que escaneaste en la app. Si usas
+> valores distintos en local y en producción, tendrás que escanear los dos
+> (o reutilizar el mismo secreto en ambos entornos).
+>
+> En **desarrollo**, si dejas `TOTP_SECRET` vacío, se **omite** el segundo
+> factor (solo se pide el PIN) para no bloquear el arranque local. En
+> **producción** es obligatorio.
+
+Más detalle en [Seguridad del panel: doble factor (2FA)](#seguridad-del-panel-doble-factor-2fa).
+
+> ⚠️ **No subas estos valores al repositorio.** Van en `.env` (ignorado por git)
+> en local y en las *Environment Variables* de Vercel en producción. Si crees
+> que un secreto se ha filtrado, genera uno nuevo y actualízalo en todos los
+> entornos (rotar `TOTP_SECRET` obliga a volver a escanear el QR).
 
 ### 4. Crear las tablas
 
@@ -126,7 +176,8 @@ npm run dev
 ```
 
 Abre <http://localhost:3000>. El panel de administración está en
-<http://localhost:3000/admin> (entra con tu `ADMIN_PIN`).
+<http://localhost:3000/admin>: entra con tu `ADMIN_PIN` y, si has configurado
+`TOTP_SECRET`, el código de 6 dígitos de tu app de autenticación.
 
 ### 6. Probar el fetcher de la jornada (opcional)
 
@@ -174,7 +225,7 @@ Luego aplica las migraciones: `npx prisma migrate deploy`.
 
 ## Roles y flujo
 
-### Administrador (`/admin`, protegido por PIN)
+### Administrador (`/admin`, protegido por PIN + 2FA)
 
 1. **Iniciar la jornada** — botón _"Iniciar"_: carga automáticamente la jornada
    actual desde SELAE. Si la fuente falla, muestra el error y ofrece un
@@ -470,7 +521,8 @@ quiniporra/
 | `npm run vercel-build`   | `prisma generate && prisma migrate deploy && next build`.      |
 | `npm run db:migrate`     | `prisma migrate dev`.                                          |
 | `npm run db:studio`      | Abre Prisma Studio.                                            |
-| `npm run fetch:jornada`  | Prueba real del fetcher de SELAE.                             |
+| `npm run fetch:jornada`  | Prueba real del fetcher de la jornada.                        |
+| `npm run totp:setup`     | Genera el secreto y el QR del doble factor (2FA).             |
 
 ## Licencia
 
