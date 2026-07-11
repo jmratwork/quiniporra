@@ -1,8 +1,8 @@
 # quiniporra 🎯
 
-Aplicación web para organizar una **porra colaborativa** alrededor de la
+Aplicación Web para organizar una **porra colaborativa** alrededor de la
 **jornada actual de La Quiniela española**. El administrador carga la jornada
-(automáticamente desde la web oficial de SELAE o a mano), invita a cada jugador
+(automáticamente desde la Web oficial de SELAE o a mano), invita a cada jugador
 a apostar un partido concreto mediante un enlace único, y gana **quien apueste
 primero** cada partido. Cuando los 15 partidos están apostados, la porra se
 cierra y se puede descargar el boleto completo en **PDF**.
@@ -106,16 +106,23 @@ cp .env.example .env
 
 Hay dos tipos de secreto y se generan de forma distinta.
 
-**A) `INVITACION_SECRET` y `SESSION_SECRET` — claves aleatorias del servidor**
+**A) `INVITACION_SECRET`, `SESSION_SECRET` y `CRON_SECRET` — claves aleatorias del servidor**
 
-Son claves que solo usa el servidor para firmar (no las comparte nadie). Vale
-cualquier cadena aleatoria larga. Genera **una distinta para cada una**:
+Son claves que solo conoce el servidor; no hay que compartirlas con ninguna app
+ni que coincidan entre sí. Vale cualquier cadena aleatoria larga. Genera **una
+distinta para cada una**:
 
 ```bash
-# Ejecútalo dos veces y usa un valor para cada variable
+# Ejecútalo una vez por variable y usa un valor para cada una
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 # → p. ej.  9f3c1a…e2b7   (64 caracteres hexadecimales)
 ```
+
+- `INVITACION_SECRET` firma los tokens de invitación (HMAC).
+- `SESSION_SECRET` firma la cookie de sesión del admin (HMAC).
+- `CRON_SECRET` protege el cron de carga automática de la jornada: Vercel lo
+  envía solo como `Authorization: Bearer <CRON_SECRET>` y la ruta
+  `/api/cron/jornada` comprueba que coincida (nadie de fuera puede dispararlo).
 
 <details>
 <summary>Alternativas sin Node (PowerShell / OpenSSL)</summary>
@@ -300,7 +307,7 @@ navegador (evita CORS y no expone nada), enviando cabeceras de navegador
 
 **`GET https://www.loteriasyapuestas.es/servicios/proximosv3?game_id=LAQU&num=1`**
 
-Endpoint JSON **no documentado** que usa la propia web de SELAE. Devuelve la
+Endpoint JSON **no documentado** que usa la propia Web de SELAE. Devuelve la
 **cabecera** de la próxima jornada abierta: número de jornada, año, fecha de
 cierre, fecha de sorteo e `id_sorteo`. **No incluye los emparejamientos.**
 
