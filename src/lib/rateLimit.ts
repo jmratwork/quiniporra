@@ -43,9 +43,22 @@ export function rateLimit(
   return { permitido: true, restante: max - r.count, resetEnMs: r.reset - ahora };
 }
 
-/** IP del cliente a partir de las cabeceras habituales de proxy (Vercel). */
+/**
+ * IP del cliente para el rate limiting.
+ *
+ * Se priorizan las cabeceras que fija el edge de Vercel y que el cliente NO
+ * puede falsificar (`x-vercel-forwarded-for`, `x-real-ip`), porque
+ * `x-forwarded-for` sí puede venir manipulada por el cliente (que la
+ * antepondría para rotar de "IP" en cada intento y saltarse el límite). Solo se
+ * cae a `x-forwarded-for` como último recurso fuera de Vercel.
+ */
 export function ipDe(req: Request): string {
+  const confiable =
+    req.headers.get('x-vercel-forwarded-for') ?? req.headers.get('x-real-ip');
+  if (confiable) return confiable.split(',')[0].trim();
+
   const xff = req.headers.get('x-forwarded-for');
   if (xff) return xff.split(',')[0].trim();
-  return req.headers.get('x-real-ip') ?? 'desconocida';
+
+  return 'desconocida';
 }

@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { cacheGet, cacheSet, TTL_JORNADA_MS } from './cache';
 import { JornadaFetchError } from './errors';
-import { obtenerPartidosMundoDeportivo } from './mundoDeportivo';
+import { obtenerPartidosMundoDeportivo, limpiaNombreEquipo } from './mundoDeportivo';
+import { fetchTextoExterno } from './fetchExterno';
 
 // Se reexporta para no romper a quien lo importaba desde aquí.
 export { JornadaFetchError };
@@ -81,8 +82,8 @@ const jornadaValidada = z.object({
     .array(
       z.object({
         numero: z.number().int().min(1).max(15),
-        local: z.string().min(1),
-        visitante: z.string().min(1),
+        local: z.string().min(1).max(80),
+        visitante: z.string().min(1).max(80),
         esPleno: z.boolean(),
       }),
     )
@@ -95,7 +96,9 @@ const jornadaValidada = z.object({
 
 function normalizaNombre(v: unknown): string {
   if (typeof v !== 'string') return '';
-  return v.replace(/\s+/g, ' ').trim();
+  // Mismo saneado defensivo que la ruta de Mundo Deportivo: elimina caracteres
+  // de control/bidi/invisibles y limita la longitud antes de tocar BD/UI/PDF.
+  return limpiaNombreEquipo(v);
 }
 
 function primerCampo(obj: Record<string, unknown>, claves: string[]): unknown {
@@ -132,22 +135,15 @@ function ymdMasDias(ymd: string, dias: number): string {
 }
 
 async function pedirJson(url: string): Promise<unknown> {
-  let res: Response;
-  try {
-    res = await fetch(url, { headers: BROWSER_HEADERS, cache: 'no-store' });
-  } catch (e) {
-    throw new JornadaFetchError(
-      'No se pudo conectar con la web de SELAE.',
-      e instanceof Error ? e.message : String(e),
-    );
-  }
+  // fetch con timeout y límite de tamaño (ver src/lib/fetchExterno.ts).
+  const res = await fetchTextoExterno(url, { headers: BROWSER_HEADERS });
   if (!res.ok) {
     throw new JornadaFetchError(
       `SELAE respondió ${res.status} en ${url.replace(BASE, '')}.`,
       `HTTP ${res.status} ${res.statusText}. La fuente puede estar bloqueando peticiones automatizadas (Akamai).`,
     );
   }
-  const texto = await res.text();
+  const texto = res.texto;
   let json: unknown;
   try {
     json = JSON.parse(texto);

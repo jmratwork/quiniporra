@@ -1,4 +1,5 @@
 import { JornadaFetchError } from './errors';
+import { fetchTextoExterno } from './fetchExterno';
 
 /**
  * Obtención de los 15 partidos del boleto VIGENTE de La Quiniela desde la
@@ -87,7 +88,13 @@ export function htmlALineas(html: string): string[] {
  */
 export function limpiaNombreEquipo(nombre: string, maxLen = 48): string {
   let s = desescapaHtml(String(nombre));
-  s = s.replace(/[\x00-\x1f\x7f<>]/g, ' ');
+  // Elimina: controles ASCII, DEL, ángulos, y caracteres Unicode invisibles /
+  // bidireccionales (soft hyphen, zero-width, marcas de dirección, LRO/RLO,
+  // aislantes, BOM) que podrían usarse para inyección indirecta o Trojan Source.
+  s = s.replace(
+    /[\x00-\x1f\x7f\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff<>]/g,
+    ' ',
+  );
   s = s.replace(/\s+/g, ' ').trim();
   return s.slice(0, maxLen);
 }
@@ -224,29 +231,16 @@ export function parseaBoleto(html: string): PartidoBoleto[] {
 export async function obtenerPartidosMundoDeportivo(
   timeoutMs = 25_000,
 ): Promise<PartidoBoleto[]> {
-  const controlador = new AbortController();
-  const temporizador = setTimeout(() => controlador.abort(), timeoutMs);
-
-  let res: Response;
-  try {
-    res = await fetch(MUNDO_DEPORTIVO_QUINIELA_URL, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'es-ES,es;q=0.9',
-      },
-      cache: 'no-store',
-      signal: controlador.signal,
-    });
-  } catch (e) {
-    throw new JornadaFetchError(
-      'No se pudo conectar con Mundo Deportivo.',
-      e instanceof Error ? e.message : String(e),
-    );
-  } finally {
-    clearTimeout(temporizador);
-  }
+  // fetch con timeout y límite de tamaño (ver src/lib/fetchExterno.ts).
+  const res = await fetchTextoExterno(MUNDO_DEPORTIVO_QUINIELA_URL, {
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'es-ES,es;q=0.9',
+    },
+    timeoutMs,
+  });
 
   if (!res.ok) {
     throw new JornadaFetchError(
@@ -255,7 +249,7 @@ export async function obtenerPartidosMundoDeportivo(
     );
   }
 
-  const partidos = parseaBoleto(await res.text());
+  const partidos = parseaBoleto(res.texto);
 
   if (partidos.length !== TOTAL) {
     throw new JornadaFetchError(
