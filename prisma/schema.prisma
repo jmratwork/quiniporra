@@ -13,6 +13,7 @@ datasource db {
 enum EstadoQuiniela {
   ABIERTA
   CERRADA
+  CADUCADA // cerrada por tiempo (pasó fechaCierre) sin completar los 15
 }
 
 enum OrigenQuiniela {

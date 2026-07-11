@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { hashToken } from '@/lib/tokens';
 import { marcasExigidas } from '@/lib/validation';
+import { rateLimit, ipDe } from '@/lib/rateLimit';
 import { ok, error, manejaError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
@@ -17,10 +18,15 @@ export const dynamic = 'force-dynamic';
  * invitación ya fue usada/anulada, se informa de que llega tarde (409).
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ token: string }> },
 ) {
   try {
+    const rl = rateLimit(`inv:${ipDe(req)}`, 60, 60_000);
+    if (!rl.permitido) {
+      return error('Demasiadas peticiones. Espera unos segundos.', 429);
+    }
+
     const { token } = await params;
     const tokenHash = hashToken(token);
 
@@ -60,6 +66,20 @@ export async function GET(
         });
       }
       return error('Llegas tarde: este partido ya ha sido apostado.', 409, undefined);
+    }
+
+    // La Quiniela ya no admite apuestas (cerrada o caducada por tiempo).
+    const q = inv.partido.quiniela;
+    const caducadaPorFecha =
+      q.estado === 'ABIERTA' && q.fechaCierre && Date.now() > q.fechaCierre.getTime();
+    if (q.estado === 'CERRADA' || q.estado === 'CADUCADA' || caducadaPorFecha) {
+      if (caducadaPorFecha) {
+        await prisma.quiniela.updateMany({
+          where: { id: q.id, estado: 'ABIERTA' },
+          data: { estado: 'CADUCADA' },
+        });
+      }
+      return error('El plazo para apostar esta jornada ya ha terminado.', 409);
     }
 
     return ok({ disponible: true, ...base });

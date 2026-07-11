@@ -7,6 +7,7 @@ import {
   validaSignosContraMultiplicidad,
 } from '@/lib/validation';
 import { TOTAL_PARTIDOS } from '@/lib/quiniela';
+import { rateLimit, ipDe } from '@/lib/rateLimit';
 import { ok, error, manejaError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
@@ -29,6 +30,12 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   try {
+    // Rate limit por IP para el endpoint público.
+    const rl = rateLimit(`apuestas:${ipDe(req)}`, 30, 60_000);
+    if (!rl.permitido) {
+      return error('Demasiadas peticiones. Espera unos segundos.', 429);
+    }
+
     const body = await req.json().catch(() => ({}));
     const datos = apuestaInputSchema.parse(body);
 
@@ -56,6 +63,19 @@ export async function POST(req: NextRequest) {
     }
     if (inv.partido.quiniela.estado === 'CERRADA') {
       return error('La Quiniela ya está cerrada.', 409);
+    }
+    if (inv.partido.quiniela.estado === 'CADUCADA') {
+      return error('La Quiniela ha caducado: pasó la fecha de cierre.', 409);
+    }
+    // Caducidad perezosa: si ya pasó la fecha de cierre y sigue ABIERTA (por
+    // tanto, incompleta), se marca CADUCADA y se rechaza la apuesta.
+    const fechaCierre = inv.partido.quiniela.fechaCierre;
+    if (fechaCierre && Date.now() > fechaCierre.getTime()) {
+      await prisma.quiniela.updateMany({
+        where: { id: inv.partido.quinielaId, estado: 'ABIERTA' },
+        data: { estado: 'CADUCADA' },
+      });
+      return error('La Quiniela ha caducado: pasó la fecha de cierre.', 409);
     }
 
     // Validación de signos contra la multiplicidad exigida.

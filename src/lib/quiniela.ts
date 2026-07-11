@@ -56,6 +56,35 @@ export function partidosApostados(q: QuinielaActiva): number {
 }
 
 /**
+ * ¿La Quiniela debe pasar a CADUCADA? Ocurre cuando sigue ABIERTA, tiene fecha
+ * de cierre, esa fecha ya pasó y NO se han completado los 15 partidos.
+ */
+export function debeCaducar(
+  q: Pick<QuinielaActiva, 'estado' | 'fechaCierre'> & { partidos: { apuesta: unknown }[] },
+  ahora = Date.now(),
+): boolean {
+  if (q.estado !== 'ABIERTA' || !q.fechaCierre) return false;
+  if (ahora <= q.fechaCierre.getTime()) return false;
+  const apostados = q.partidos.filter((p) => p.apuesta !== null).length;
+  return apostados < TOTAL_PARTIDOS;
+}
+
+/**
+ * Caducidad perezosa: si procede, marca la Quiniela como CADUCADA en la BD y
+ * devuelve el estado resultante. Se llama al leer/actuar sobre la Quiniela.
+ */
+export async function caducarSiProcede(q: QuinielaActiva): Promise<QuinielaActiva['estado']> {
+  if (debeCaducar(q)) {
+    await prisma.quiniela.update({
+      where: { id: q.id },
+      data: { estado: 'CADUCADA' },
+    });
+    q.estado = 'CADUCADA';
+  }
+  return q.estado;
+}
+
+/**
  * Vista pública: no revela los signos hasta que la Quiniela está CERRADA.
  */
 export function vistaPublica(q: QuinielaActiva) {

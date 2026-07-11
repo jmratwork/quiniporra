@@ -36,7 +36,7 @@ interface PartidoAdmin {
 
 interface QuinielaAdmin {
   jornada: string;
-  estado: 'ABIERTA' | 'CERRADA';
+  estado: 'ABIERTA' | 'CERRADA' | 'CADUCADA';
   origen: 'AUTOMATICO' | 'MANUAL';
   fechaCierre: string | null;
   apostados: number;
@@ -301,6 +301,8 @@ export default function AdminPage() {
   }
 
   const cerrada = quiniela?.estado === 'CERRADA';
+  const caducada = quiniela?.estado === 'CADUCADA';
+  const abierta = quiniela?.estado === 'ABIERTA';
   const progreso = quiniela ? (quiniela.apostados / quiniela.total) * 100 : 0;
 
   return (
@@ -352,12 +354,18 @@ export default function AdminPage() {
                   className={`badge ${
                     cerrada
                       ? 'bg-oro-400/15 text-oro-300 ring-oro-400/30'
-                      : 'bg-cesped-400/15 text-cesped-300 ring-cesped-400/30'
+                      : caducada
+                        ? 'bg-red-400/15 text-red-300 ring-red-400/30'
+                        : 'bg-cesped-400/15 text-cesped-300 ring-cesped-400/30'
                   }`}
                 >
                   <span
                     className={`h-1.5 w-1.5 rounded-full ${
-                      cerrada ? 'bg-oro-400' : 'animate-pulse-dot bg-cesped-400'
+                      cerrada
+                        ? 'bg-oro-400'
+                        : caducada
+                          ? 'bg-red-400'
+                          : 'animate-pulse-dot bg-cesped-400'
                     }`}
                   />
                   {quiniela.estado}
@@ -379,13 +387,19 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {!cerrada && (
+          {abierta && (
             <div className="relative mt-5 h-2.5 w-full overflow-hidden rounded-full bg-white/[0.07]">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-cesped-500 to-cesped-300 transition-[width] duration-500"
                 style={{ width: `${progreso}%` }}
               />
             </div>
+          )}
+          {caducada && (
+            <p className="relative mt-4 text-sm text-red-300">
+              ⏱️ Caducada: el plazo terminó con {quiniela.total - quiniela.apostados}{' '}
+              partido(s) sin apostar.
+            </p>
           )}
         </header>
       )}
@@ -401,7 +415,7 @@ export default function AdminPage() {
               <PartidoAdminFila
                 key={p.numero}
                 partido={p}
-                bloqueado={cerrada}
+                bloqueado={cerrada || caducada}
                 onCambio={cargar}
                 onSesionExpirada={sesionExpirada}
                 onToast={setToast}
@@ -478,6 +492,22 @@ function PartidoAdminFila({
       onToast({ tipo: 'exito', texto: 'Enlace copiado al portapapeles.' });
     } catch {
       onToast({ tipo: 'info', texto });
+    }
+  }
+
+  async function anularInvitacion(id: string) {
+    if (!confirm('¿Anular esta invitación? El enlace dejará de servir para apostar.')) return;
+    const res = await fetch(`/api/admin/invitaciones/${id}`, { method: 'DELETE' });
+    if (res.status === 401) {
+      onSesionExpirada();
+      return;
+    }
+    if (res.ok) {
+      onToast({ tipo: 'info', texto: 'Invitación anulada.' });
+      onCambio();
+    } else {
+      const j = await res.json().catch(() => ({}));
+      onToast({ tipo: 'error', texto: j.error ?? 'No se pudo anular la invitación.' });
     }
   }
 
@@ -565,7 +595,7 @@ function PartidoAdminFila({
 
       {/* Invitaciones emitidas */}
       {partido.invitaciones.length > 0 && (
-        <div className="mt-2.5 flex flex-wrap gap-1.5 sm:pl-[4.75rem]">
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5 sm:pl-[4.75rem]">
           {partido.invitaciones.map((inv) => (
             <span
               key={inv.id}
@@ -573,6 +603,16 @@ function PartidoAdminFila({
               title={`${inv.nombreJugador} · ${inv.multiplicidad.toLowerCase()}`}
             >
               {inv.nombreJugador}: {inv.estado.toLowerCase()}
+              {inv.estado === 'PENDIENTE' && !bloqueado && (
+                <button
+                  onClick={() => anularInvitacion(inv.id)}
+                  className="ml-1 text-red-300 hover:text-red-200"
+                  title="Anular invitación"
+                  aria-label={`Anular la invitación de ${inv.nombreJugador}`}
+                >
+                  ✕
+                </button>
+              )}
             </span>
           ))}
         </div>

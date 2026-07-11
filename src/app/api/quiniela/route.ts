@@ -1,6 +1,11 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getQuinielaActiva, vistaAdmin, vistaPublica } from '@/lib/quiniela';
+import {
+  getQuinielaActiva,
+  caducarSiProcede,
+  vistaAdmin,
+  vistaPublica,
+} from '@/lib/quiniela';
 import { tieneSesionAdmin, requiereSesionAdmin } from '@/lib/auth';
 import { ok, manejaError } from '@/lib/http';
 
@@ -20,6 +25,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const q = await getQuinielaActiva();
+    if (q) await caducarSiProcede(q); // cierre por tiempo perezoso
     return ok({
       quiniela: q ? (esAdmin ? vistaAdmin(q) : vistaPublica(q)) : null,
       esAdmin,

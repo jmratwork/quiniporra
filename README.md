@@ -39,12 +39,16 @@ partidos**:
 - **Partido 15 (Pleno al 15)**: se apuesta el número de goles de **cada equipo
   por separado**, eligiendo entre **`0`**, **`1`** o **`M`** (M = 2 o más).
 
-**Estados**: `ABIERTA` → `CERRADA`.
+**Estados**: `ABIERTA` → `CERRADA` (o `ABIERTA` → `CADUCADA`).
 
 - `ABIERTA`: quedan partidos sin apostar.
 - `CERRADA`: los 15 partidos ya tienen apuesta. El paso a `CERRADA` es
   **automático** en cuanto se registra la apuesta del último partido pendiente
   (dentro de la misma transacción).
+- `CADUCADA`: se alcanzó la `fechaCierre` **sin** completar los 15 partidos. La
+  jornada deja de admitir apuestas (409) y no genera boleto. El paso a
+  `CADUCADA` es perezoso: se aplica al leer o intentar apostar una vez pasada la
+  fecha de cierre. Los pronósticos **no** se revelan (la porra no se completó).
 
 ### Multiplicidad de las invitaciones
 
@@ -262,7 +266,8 @@ Luego aplica las migraciones: `npx prisma migrate deploy`.
 2. **Invitar a apostar** — para un partido, genera una invitación con el nombre
    del jugador y la **multiplicidad**. Se obtiene un **enlace único con token**
    que el admin copia y envía por su cuenta (WhatsApp, email…). _La app no envía
-   correos._ Se pueden crear varias invitaciones para el mismo partido.
+   correos._ Se pueden crear varias invitaciones para el mismo partido, y
+   **anular** desde el panel las que sigan pendientes (dejan de servir).
 3. **Panel de seguimiento** — tabla con los 15 partidos: equipos, multiplicidad,
    estado (`PENDIENTE`/`APOSTADO`), signos apostados, nombre del apostante y las
    invitaciones emitidas con su estado (`pendiente`, `usada`, `anulada`).
@@ -407,8 +412,9 @@ introducir los 15 partidos a mano si la carga automática falla.
 | `POST`   | `/api/quiniela/iniciar`     | "Iniciar": busca la jornada en SELAE y crea la Quiniela. **502** si falla.  | sesión    |
 | `POST`   | `/api/quiniela/manual`      | Fallback: crear la jornada con los 15 partidos a mano.                      | sesión    |
 | `POST`   | `/api/invitaciones`         | Crea invitación (partido, nombre, multiplicidad). Devuelve el token 1 vez.  | sesión    |
-| `GET`    | `/api/invitaciones/[token]` | Datos para la pantalla del jugador. **409** si el partido ya está apostado. | token     |
-| `POST`   | `/api/apuestas`             | Registra la apuesta. **400** si no cumple multiplicidad; **409** si tarde.  | token     |
+| `DELETE` | `/api/admin/invitaciones/[id]` | Anula una invitación PENDIENTE (409 si ya fue usada).                    | sesión    |
+| `GET`    | `/api/invitaciones/[token]` | Datos para la pantalla del jugador. **409** si ya apostado o fuera de plazo. | token     |
+| `POST`   | `/api/apuestas`             | Registra la apuesta. **400** multiplicidad; **409** tarde/caducada; **429**. | token     |
 | `GET`    | `/api/quiniela/pdf`         | PDF del boleto (solo si `CERRADA`; **409** si no).                          | ninguna   |
 
 ### Seguridad del panel: doble factor (2FA)

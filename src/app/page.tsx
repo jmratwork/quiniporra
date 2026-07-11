@@ -51,6 +51,8 @@ export default async function HomePage() {
   }
 
   const cerrada = vista.estado === 'CERRADA';
+  const caducada = vista.estado === 'CADUCADA';
+  const abierta = vista.estado === 'ABIERTA';
   const progreso = (vista.apostados / vista.total) * 100;
 
   return (
@@ -74,12 +76,14 @@ export default async function HomePage() {
               className={`badge ${
                 cerrada
                   ? 'bg-oro-400/15 text-oro-300 ring-oro-400/30'
-                  : 'bg-cesped-400/15 text-cesped-300 ring-cesped-400/30'
+                  : caducada
+                    ? 'bg-red-400/15 text-red-300 ring-red-400/30'
+                    : 'bg-cesped-400/15 text-cesped-300 ring-cesped-400/30'
               }`}
             >
               <span
                 className={`h-1.5 w-1.5 rounded-full ${
-                  cerrada ? 'bg-oro-400' : 'animate-pulse-dot bg-cesped-400'
+                  cerrada ? 'bg-oro-400' : caducada ? 'bg-red-400' : 'animate-pulse-dot bg-cesped-400'
                 }`}
               />
               {vista.estado}
@@ -108,7 +112,7 @@ export default async function HomePage() {
           </div>
         </div>
 
-        {!cerrada && (
+        {abierta && (
           <div className="relative mt-5">
             <div className="h-2.5 w-full overflow-hidden rounded-full bg-white/[0.07]">
               <div
@@ -130,6 +134,17 @@ export default async function HomePage() {
         </section>
       )}
 
+      {/* Caducada por tiempo */}
+      {caducada && (
+        <section className="overflow-hidden rounded-2xl border border-red-400/30 bg-red-400/[0.06] p-5 text-center">
+          <h2 className="text-lg font-black text-red-300">⏱️ Jornada caducada</h2>
+          <p className="mt-1 text-sm text-slate-300">
+            El plazo terminó con {vista.total - vista.apostados} partido(s) sin apostar,
+            así que la porra no se completó.
+          </p>
+        </section>
+      )}
+
       {/* Los 15 partidos */}
       <section className="card overflow-hidden">
         <div className="border-b border-white/10 px-4 py-3 text-xs font-bold uppercase tracking-wide text-slate-400">
@@ -140,7 +155,7 @@ export default async function HomePage() {
         ))}
       </section>
 
-      {!cerrada && (
+      {abierta && (
         <p className="text-center text-xs text-slate-500">
           Los pronósticos se revelarán cuando la porra esté completa (los 15 partidos
           apostados).
