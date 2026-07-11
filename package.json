@@ -12,7 +12,9 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "fetch:jornada": "tsx scripts/fetch-jornada.ts",
-    "totp:setup": "tsx scripts/totp-setup.ts"
+    "totp:setup": "tsx scripts/totp-setup.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@prisma/client": "^6.3.1",
@@ -37,6 +39,7 @@
     "prisma": "^6.3.1",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
   }
 }
