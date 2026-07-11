@@ -29,3 +29,8 @@ next-env.d.ts
 # sistema
 .DS_Store
 Thumbs.db
+
+# framework de auditoría de seguridad (local, no forma parte de la app)
+/.claude/
+/CLAUDE.md
+/scripts/security/
