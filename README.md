@@ -100,6 +100,7 @@ cp .env.example .env
 | `INVITACION_SECRET` | Secreto HMAC para firmar los tokens de invitación. **Oblig. en prod.**         |
 | `SESSION_SECRET`    | Secreto HMAC para firmar la cookie de sesión del admin. **Oblig. en prod.**    |
 | `TOTP_SECRET`       | Secreto base32 del segundo factor (2FA). **Oblig. en prod.** Ver más abajo.     |
+| `CRON_SECRET`       | Protege el cron de carga automática de la jornada. **Oblig. en prod.**          |
 
 #### Cómo generar cada secreto
 
@@ -258,11 +259,10 @@ Luego aplica las migraciones: `npx prisma migrate deploy`.
 
 ### Administrador (`/admin`, protegido por PIN + 2FA)
 
-1. **Iniciar la jornada** — botón _"Iniciar"_: carga automáticamente la jornada
-   actual desde SELAE. Si la fuente falla, muestra el error y ofrece un
-   **formulario manual** para introducir los 15 partidos a mano. Solo puede
-   existir **una** Quiniela activa; si ya hay una, pide confirmación y la
-   reemplaza (borra partidos, invitaciones y apuestas anteriores).
+1. **La jornada se carga sola** — no hay botón de "Iniciar": la jornada actual
+   se carga **automáticamente** (ver [Carga programada](#carga-programada-de-la-jornada))
+   y aparece tanto en el panel como en la página de inicio pública. Cuando aún
+   no hay jornada, el panel lo indica.
 2. **Invitar a apostar** — para un partido, genera una invitación con el nombre
    del jugador y la **multiplicidad**. Se obtiene un **enlace único con token**
    que el admin copia y envía por su cuenta (WhatsApp, email…). _La app no envía
@@ -354,24 +354,49 @@ La orquestación vive en
 memoria de 10 minutos** para no repetir la petición si se pulsa "Iniciar" varias
 veces.
 
-### Limitaciones (importante) y fallback manual
+### Carga programada de la jornada
+
+La jornada se carga **automáticamente** mediante un **cron de Vercel** que llama
+a `GET /api/cron/jornada` (ver `vercel.json`):
+
+- **Lunes** a las 18:00 (hora de Barcelona) — jornada de entresemana.
+- **Jueves** a las 18:00 (hora de Barcelona) — jornada de fin de semana.
+
+Así, tanto la página de inicio pública como el panel muestran la jornada sin
+que nadie tenga que iniciarla a mano. La carga es **idempotente y no
+destructiva** (`src/lib/cargaJornada.ts`):
+
+- Si no hay jornada → la crea.
+- Si ya está cargada la misma jornada → no hace nada.
+- Si la jornada anterior ya terminó (`CERRADA`/`CADUCADA` o pasada su
+  `fechaCierre`) → la reemplaza por la nueva.
+- Si hay una porra **ABIERTA en curso** (distinta jornada, aún en plazo) → **no
+  la toca** (no se destruyen apuestas a medias); se reintenta en el siguiente
+  disparo.
+
+El endpoint está protegido con `CRON_SECRET` (Vercel envía
+`Authorization: Bearer <CRON_SECRET>`). **Zona horaria:** Vercel programa los
+crons en **UTC**; están fijados a las **17:00 UTC** (= 18:00 en horario de
+invierno CET, el grueso de la temporada). En horario de verano (CEST) se
+dispararían a las 19:00 locales; como la carga es idempotente, el pequeño
+desfase es inocuo. Ajusta `vercel.json` si quieres exactitud todo el año.
+
+### Limitaciones (importante)
 
 - Ninguna de las dos fuentes es una **API oficial documentada**: su estructura
   **puede cambiar sin aviso**. Los parsers son defensivos y validados, pero
   podrían dejar de funcionar.
 - Mundo Deportivo puede publicar solo los 14 partidos y **omitir el Pleno al
   15** hasta más cerca de la jornada. En ese caso la carga automática devuelve
-  un error claro (**502**) pidiendo usar el formulario manual.
+  un error claro (**502**) y se reintenta en el siguiente disparo del cron.
 - La protección **Akamai** de SELAE puede responder **403** a peticiones
   automatizadas según el cliente y la IP. En las pruebas, el `fetch` de
   **Node.js** (con cabeceras de navegador) atraviesa la protección; `curl`
   recibe 403. Desde IPs de datacenter (p. ej. Vercel) puede variar. Como la
   cabecera de SELAE es **best-effort**, si falla se sigue adelante con los
   partidos de Mundo Deportivo.
-
-Por todo lo anterior, **la app nunca depende exclusivamente de una fuente
-externa**: el botón _"Iniciar"_ siempre ofrece el **formulario manual** para
-introducir los 15 partidos a mano si la carga automática falla.
+- Para emergencias siguen existiendo (protegidas por sesión, sin exponer en la
+  UI) los endpoints `POST /api/quiniela/iniciar` y `POST /api/quiniela/manual`.
 
 ### Ejemplo real de `npm run fetch:jornada`
 
@@ -416,6 +441,7 @@ introducir los 15 partidos a mano si la carga automática falla.
 | `GET`    | `/api/invitaciones/[token]` | Datos para la pantalla del jugador. **409** si ya apostado o fuera de plazo. | token     |
 | `POST`   | `/api/apuestas`             | Registra la apuesta. **400** multiplicidad; **409** tarde/caducada; **429**. | token     |
 | `GET`    | `/api/quiniela/pdf`         | PDF del boleto (solo si `CERRADA`; **409** si no).                          | ninguna   |
+| `GET`    | `/api/cron/jornada`         | Carga automática de la jornada (idempotente, no destructiva). **502** si falla la fuente. | cron      |
 
 ### Seguridad del panel: doble factor (2FA)
 

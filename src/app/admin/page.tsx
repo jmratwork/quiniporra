@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { FormularioManual, type DatosManual } from '@/components/FormularioManual';
 import { Toast, type MensajeToast } from '@/components/Toast';
 import { BotonImprimir } from '@/components/BotonImprimir';
 import { CasillasSignos } from '@/components/CasillasSignos';
@@ -58,8 +57,6 @@ export default function AdminPage() {
   const [autenticado, setAutenticado] = useState(false);
   const [quiniela, setQuiniela] = useState<QuinielaAdmin | null>(null);
   const [cargando, setCargando] = useState(false);
-  const [iniciando, setIniciando] = useState(false);
-  const [modoManual, setModoManual] = useState(false);
   const [toast, setToast] = useState<MensajeToast | null>(null);
 
   // Carga el estado de la quiniela. La autenticación va por cookie de sesión
@@ -147,75 +144,6 @@ export default function AdminPage() {
     setQuiniela(null);
   }
 
-  async function iniciar(confirmar = false) {
-    setIniciando(true);
-    setModoManual(false);
-    try {
-      const res = await fetch('/api/quiniela/iniciar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmar }),
-      });
-      if (res.status === 401) return sesionExpirada();
-      const json = await res.json();
-      if (res.status === 409) {
-        if (
-          confirm(
-            'Ya existe una Quiniela activa. ¿Reemplazarla? Se borrarán sus partidos, invitaciones y apuestas.',
-          )
-        ) {
-          setIniciando(false);
-          return iniciar(true);
-        }
-        return;
-      }
-      if (res.status === 502) {
-        setToast({
-          tipo: 'error',
-          texto: 'No se pudo cargar la jornada automáticamente. Usa el formulario manual.',
-        });
-        setModoManual(true);
-        return;
-      }
-      if (!res.ok) {
-        setToast({ tipo: 'error', texto: json.error ?? 'Error al iniciar.' });
-        return;
-      }
-      setToast({ tipo: 'exito', texto: 'Jornada cargada correctamente.' });
-      await cargar();
-    } finally {
-      setIniciando(false);
-    }
-  }
-
-  async function crearManual(datos: DatosManual, confirmar = false) {
-    setIniciando(true);
-    try {
-      const res = await fetch('/api/quiniela/manual', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...datos, confirmar }),
-      });
-      if (res.status === 401) return sesionExpirada();
-      const json = await res.json();
-      if (res.status === 409) {
-        if (confirm('Ya existe una Quiniela activa. ¿Reemplazarla?')) {
-          setIniciando(false);
-          return crearManual(datos, true);
-        }
-        return;
-      }
-      if (!res.ok) {
-        setToast({ tipo: 'error', texto: json.detalle ?? json.error ?? 'Error.' });
-        return;
-      }
-      setToast({ tipo: 'exito', texto: 'Jornada creada manualmente.' });
-      setModoManual(false);
-      await cargar();
-    } finally {
-      setIniciando(false);
-    }
-  }
 
   async function reiniciar() {
     if (!confirm('¿Borrar la Quiniela activa y todas sus apuestas?')) return;
@@ -319,28 +247,15 @@ export default function AdminPage() {
 
       {/* Acciones principales */}
       {!quiniela ? (
-        <section className="card space-y-5 p-6">
-          <div>
-            <h2 className="text-lg font-black text-white">Iniciar la jornada</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              Carga automáticamente la jornada actual de La Quiniela. Si la fuente falla,
-              podrás introducir los 15 partidos a mano.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <button onClick={() => iniciar(false)} disabled={iniciando} className="btn-primary">
-              {iniciando ? 'Cargando…' : '▶ Iniciar (automático)'}
-            </button>
-            <button onClick={() => setModoManual((v) => !v)} className="btn-ghost">
-              {modoManual ? 'Ocultar formulario manual' : 'Introducir a mano'}
-            </button>
-          </div>
-
-          {modoManual && (
-            <div className="border-t border-white/10 pt-5">
-              <FormularioManual onEnviar={(d) => crearManual(d)} enviando={iniciando} />
-            </div>
-          )}
+        <section className="card space-y-3 p-6 text-center">
+          <div className="text-4xl">🗓️</div>
+          <h2 className="text-lg font-black text-white">Aún no hay jornada activa</h2>
+          <p className="mx-auto max-w-md text-sm text-slate-400">
+            La jornada de La Quiniela se carga <strong>automáticamente</strong> los
+            <strong> lunes</strong> (entresemana) y los <strong>jueves</strong> (fin de
+            semana) a las <strong>18:00</strong> (hora de Barcelona). Aparecerá aquí y en
+            la página de inicio en cuanto se cargue.
+          </p>
         </section>
       ) : (
         <header className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-noche-700 to-noche-950 p-6 shadow-2xl">
