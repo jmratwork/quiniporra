@@ -1,47 +1,41 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { authenticator } from 'otplib';
 
-// TOTP_SECRET debe existir antes de ejercitar verificarTotp.
 const SECRET = 'ANVWINJPDFFTU5YM';
 
-let verificarTotp: (code: string) => boolean;
+let comprobarTotp: (code: string) => { valido: boolean; paso: number | null };
 let totpConfigurado: () => boolean;
 
 beforeAll(async () => {
   process.env.TOTP_SECRET = SECRET;
-  // Import diferido para que el módulo lea el entorno ya configurado.
   const mod = await import('../src/lib/totp');
-  verificarTotp = mod.verificarTotp;
+  comprobarTotp = mod.comprobarTotp;
   totpConfigurado = mod.totpConfigurado;
 });
 
-describe('verificarTotp', () => {
+describe('comprobarTotp (comprobación criptográfica pura)', () => {
   it('totpConfigurado() es true cuando hay secreto', () => {
     expect(totpConfigurado()).toBe(true);
   });
 
-  it('acepta el código actual y rechaza uno incorrecto', () => {
-    const malo = '000000';
-    // Genera un código válido distinto del "malo".
+  it('acepta el código actual y devuelve su paso de tiempo', () => {
     const bueno = authenticator.generate(SECRET);
-    // (Si por casualidad coincidieran, el test seguiría siendo válido.)
-    expect(verificarTotp(malo === bueno ? '111111' : malo)).toBe(false);
-    expect(verificarTotp(bueno)).toBe(true);
+    const r = comprobarTotp(bueno);
+    expect(r.valido).toBe(true);
+    expect(typeof r.paso).toBe('number');
+    // El paso corresponde al intervalo de 30 s actual.
+    expect(r.paso).toBe(Math.floor(Date.now() / 1000 / 30));
   });
 
-  it('anti-replay: rechaza reutilizar el mismo código', () => {
-    const code = authenticator.generate(SECRET);
-    const primera = verificarTotp(code);
-    const segunda = verificarTotp(code);
-    // La primera puede ser true (si no se usó ya en el test anterior) o false
-    // (si el paso de tiempo ya se consumió); lo esencial es que NUNCA se acepte
-    // dos veces seguidas el mismo código.
-    expect(primera && segunda).toBe(false);
+  it('rechaza un código incorrecto', () => {
+    const bueno = authenticator.generate(SECRET);
+    const malo = bueno === '000000' ? '111111' : '000000';
+    expect(comprobarTotp(malo).valido).toBe(false);
   });
 
   it('rechaza formatos no numéricos de 6 dígitos', () => {
-    expect(verificarTotp('12345')).toBe(false);
-    expect(verificarTotp('abcdef')).toBe(false);
-    expect(verificarTotp('')).toBe(false);
+    expect(comprobarTotp('12345').valido).toBe(false);
+    expect(comprobarTotp('abcdef').valido).toBe(false);
+    expect(comprobarTotp('').valido).toBe(false);
   });
 });

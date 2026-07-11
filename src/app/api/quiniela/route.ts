@@ -18,10 +18,9 @@ export const dynamic = 'force-dynamic';
  *  - Con sesión de administración válida: vista de administración.
  */
 export async function GET(req: NextRequest) {
-  // La autenticación (cookie de sesión) NO depende de la base de datos: se
-  // calcula primero, para que el admin pueda entrar aunque no exista ninguna
-  // Quiniela o la BD no responda.
-  const esAdmin = tieneSesionAdmin(req);
+  // Autenticación por cookie de sesión (firma + revocación). La comprobación de
+  // revocación es fail-open ante fallo de BD, para no bloquear el acceso.
+  const esAdmin = await tieneSesionAdmin(req);
 
   try {
     const q = await getQuinielaActiva();
@@ -43,7 +42,7 @@ export async function GET(req: NextRequest) {
  */
 export async function DELETE(req: NextRequest) {
   try {
-    requiereSesionAdmin(req);
+    await requiereSesionAdmin(req);
 
     const activa = await prisma.quiniela.findFirst({
       orderBy: { createdAt: 'desc' },

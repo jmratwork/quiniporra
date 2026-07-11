@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   try {
-    requiereSesionAdmin(req);
+    await requiereSesionAdmin(req);
     const body = await req.json().catch(() => ({}));
 
     const datos = quinielaManualSchema.parse(body);

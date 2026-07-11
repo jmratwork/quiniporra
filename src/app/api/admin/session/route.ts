@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(req: NextRequest) {
   return ok({
-    autenticado: tieneSesionAdmin(req),
+    autenticado: await tieneSesionAdmin(req),
     totpRequerido: totpRequerido(),
   });
 }

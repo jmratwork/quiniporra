@@ -84,6 +84,36 @@ model Invitacion {
   @@map("invitaciones")
 }
 
+/// Sesiones de administración revocadas (logout / pánico). Se consulta en cada
+/// petición protegida; se puede podar cuando `expiraEn` ya pasó. (M4)
+model SesionRevocada {
+  jti       String   @id
+  expiraEn  DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiraEn])
+  @@map("sesiones_revocadas")
+}
+
+/// Rate limiting persistente por clave (p. ej. "login:IP"), compartido entre
+/// instancias serverless. (M3)
+model RateLimit {
+  clave    String   @id
+  contador Int      @default(0)
+  reset    DateTime
+
+  @@map("rate_limits")
+}
+
+/// Anti-replay del segundo factor: último "paso" de tiempo TOTP consumido,
+/// compartido entre instancias serverless (fila única id=1). (M3)
+model TotpStep {
+  id         Int @id @default(1)
+  ultimoStep Int @default(0)
+
+  @@map("totp_step")
+}
+
 /// Apuesta registrada para un partido. La restricción única sobre
 /// (quinielaId, numeroPartido) garantiza "una sola apuesta por partido"
 /// a nivel de base de datos y evita condiciones de carrera.

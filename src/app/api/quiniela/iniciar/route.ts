@@ -20,7 +20,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   try {
-    requiereSesionAdmin(req);
+    await requiereSesionAdmin(req);
     const body = await req.json().catch(() => ({}));
 
     const confirmar = body?.confirmar === true;

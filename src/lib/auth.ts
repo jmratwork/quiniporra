@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
-import { COOKIE_SESION, sesionValida } from './session';
+import { COOKIE_SESION, leerToken } from './session';
+import { sesionRevocada, revocarJti } from './authStore';
 
 /**
  * Autenticación del panel de administración.
@@ -61,14 +62,26 @@ export function pinCorrecto(pin: string): boolean {
   return typeof pin === 'string' && comparaSeguro(pin, esperado);
 }
 
-/** ¿La petición trae una cookie de sesión de administración válida? */
-export function tieneSesionAdmin(req: NextRequest): boolean {
-  return sesionValida(req.cookies.get(COOKIE_SESION)?.value);
+/**
+ * ¿La petición trae una cookie de sesión de administración válida (firma + no
+ * caducada + no revocada)? La comprobación de revocación consulta la BD (M4);
+ * es fail-open si la BD no responde (ver lib/authStore.ts).
+ */
+export async function tieneSesionAdmin(req: NextRequest): Promise<boolean> {
+  const datos = leerToken(req.cookies.get(COOKIE_SESION)?.value);
+  if (!datos) return false;
+  return !(await sesionRevocada(datos.jti));
 }
 
 /** Exige sesión de administración válida; lanza AdminAuthError(401) si no. */
-export function requiereSesionAdmin(req: NextRequest): void {
-  if (!tieneSesionAdmin(req)) {
+export async function requiereSesionAdmin(req: NextRequest): Promise<void> {
+  if (!(await tieneSesionAdmin(req))) {
     throw new AdminAuthError(401, 'Sesión de administración no válida o caducada.');
   }
+}
+
+/** Revoca la sesión actual (logout): su jti deja de ser válido hasta caducar. */
+export async function revocarSesion(req: NextRequest): Promise<void> {
+  const datos = leerToken(req.cookies.get(COOKIE_SESION)?.value);
+  if (datos) await revocarJti(datos.jti, new Date(datos.exp));
 }

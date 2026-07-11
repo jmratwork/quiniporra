@@ -16,7 +16,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    requiereSesionAdmin(req);
+    await requiereSesionAdmin(req);
     const { id } = await params;
 
     const inv = await prisma.invitacion.findUnique({ where: { id } });

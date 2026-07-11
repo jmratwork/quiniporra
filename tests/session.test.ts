@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 
 let crearTokenSesion: (ahora?: number) => string;
 let sesionValida: (token: string | undefined, ahora?: number) => boolean;
+let leerToken: (token: string | undefined, ahora?: number) => { exp: number; jti: string } | null;
 let TTL_SESION_MS: number;
 
 beforeAll(async () => {
@@ -9,6 +10,7 @@ beforeAll(async () => {
   const mod = await import('../src/lib/session');
   crearTokenSesion = mod.crearTokenSesion;
   sesionValida = mod.sesionValida;
+  leerToken = mod.leerToken;
   TTL_SESION_MS = mod.TTL_SESION_MS;
 });
 
@@ -16,6 +18,13 @@ describe('cookie de sesión firmada', () => {
   it('un token recién creado es válido', () => {
     const t = crearTokenSesion();
     expect(sesionValida(t)).toBe(true);
+  });
+
+  it('cada token lleva un jti aleatorio distinto (para revocación)', () => {
+    const a = leerToken(crearTokenSesion());
+    const b = leerToken(crearTokenSesion());
+    expect(a?.jti).toBeTruthy();
+    expect(a?.jti).not.toBe(b?.jti);
   });
 
   it('un token vacío o malformado no es válido', () => {

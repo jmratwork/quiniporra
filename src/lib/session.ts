@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 
 /**
  * Sesión de administración mediante cookie firmada (HMAC-SHA256).
@@ -34,27 +34,49 @@ function comparaHex(a: string, b: string): boolean {
   return timingSafeEqual(ba, bb);
 }
 
-/** Crea un token de sesión firmado que caduca en TTL_SESION_MS. */
+export interface DatosSesion {
+  exp: number;
+  jti: string;
+}
+
+/**
+ * Crea un token de sesión firmado que caduca en TTL_SESION_MS. Incluye un `jti`
+ * aleatorio que permite revocar la sesión de forma selectiva (ver M4).
+ */
 export function crearTokenSesion(ahora = Date.now()): string {
-  const payload = Buffer.from(
-    JSON.stringify({ exp: ahora + TTL_SESION_MS }),
-    'utf8',
-  ).toString('base64url');
+  const datos: DatosSesion = {
+    exp: ahora + TTL_SESION_MS,
+    jti: randomBytes(16).toString('hex'),
+  };
+  const payload = Buffer.from(JSON.stringify(datos), 'utf8').toString('base64url');
   return `${payload}.${firma(payload)}`;
+}
+
+/**
+ * Verifica firma y caducidad y devuelve el payload ({ exp, jti }) o null.
+ * Es la base de `sesionValida`; expone el `jti` para la revocación.
+ */
+export function leerToken(
+  token: string | undefined,
+  ahora = Date.now(),
+): DatosSesion | null {
+  if (!token) return null;
+  const punto = token.lastIndexOf('.');
+  if (punto <= 0) return null;
+  const payload = token.slice(0, punto);
+  const sig = token.slice(punto + 1);
+  if (!comparaHex(firma(payload), sig)) return null;
+  try {
+    const datos = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (typeof datos.exp !== 'number' || ahora >= datos.exp) return null;
+    if (typeof datos.jti !== 'string' || datos.jti.length === 0) return null;
+    return { exp: datos.exp, jti: datos.jti };
+  } catch {
+    return null;
+  }
 }
 
 /** Comprueba que un token de sesión es válido (firma correcta y no caducado). */
 export function sesionValida(token: string | undefined, ahora = Date.now()): boolean {
-  if (!token) return false;
-  const punto = token.lastIndexOf('.');
-  if (punto <= 0) return false;
-  const payload = token.slice(0, punto);
-  const sig = token.slice(punto + 1);
-  if (!comparaHex(firma(payload), sig)) return false;
-  try {
-    const datos = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    return typeof datos.exp === 'number' && ahora < datos.exp;
-  } catch {
-    return false;
-  }
+  return leerToken(token, ahora) !== null;
 }

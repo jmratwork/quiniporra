@@ -426,11 +426,20 @@ El acceso a `/admin` exige **dos factores**:
    Authenticator, Authy, 1Password…) — *algo que tienes*, con `TOTP_SECRET`.
 
 Al superar ambos en `POST /api/admin/login` se emite una **cookie de sesión
-firmada** (HMAC con `SESSION_SECRET`), `httpOnly` + `Secure` + `SameSite=Strict`
-y TTL de 8 h. Las demás rutas de admin ya **no reciben el PIN**: validan esa
-cookie (**401** si falta o caduca). El login está protegido con **rate limiting**
-por IP (5 intentos/10 min → **429**) y con **anti-replay** (un mismo código TOTP
-no se puede usar dos veces). El mensaje de error no revela qué factor ha fallado.
+firmada** (HMAC con `SESSION_SECRET`), `httpOnly` + `Secure` + `SameSite=Strict`,
+TTL de 8 h y con un **`jti`** aleatorio. Las demás rutas de admin ya **no reciben
+el PIN**: validan esa cookie (**401** si falta o caduca). El login está protegido
+con **rate limiting** por IP (5 intentos/10 min → **429**) y con **anti-replay**
+(un mismo código TOTP no se puede usar dos veces). El mensaje de error no revela
+qué factor ha fallado.
+
+**Estado compartido entre instancias serverless.** El rate limiting, el
+anti-replay del TOTP y la **revocación de sesiones** se guardan en Postgres
+(tablas `rate_limits`, `totp_step`, `sesiones_revocadas`), no en memoria, para
+que funcionen aunque Vercel reparta las peticiones entre varias instancias. El
+`logout` **revoca** el `jti` (la sesión deja de valer aunque el token esté en
+otro sitio). Estas comprobaciones son *fail-open* ante un fallo de BD: no
+bloquean el login (la seguridad de fondo sigue en PIN + TOTP + cookie firmada).
 
 **Enrolamiento (una vez):**
 

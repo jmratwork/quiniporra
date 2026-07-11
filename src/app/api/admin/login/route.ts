@@ -1,8 +1,9 @@
 import { NextRequest } from 'next/server';
 import { pinCorrecto } from '@/lib/auth';
-import { verificarTotp } from '@/lib/totp';
+import { comprobarTotp } from '@/lib/totp';
 import { crearTokenSesion, COOKIE_SESION, TTL_SESION_MS } from '@/lib/session';
-import { rateLimit, ipDe } from '@/lib/rateLimit';
+import { ipDe } from '@/lib/rateLimit';
+import { rateLimitPersistente, pasoTotpYaUsado } from '@/lib/authStore';
 import { ok, error, manejaError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
@@ -17,8 +18,8 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   try {
-    // Límite: 5 intentos cada 10 minutos por IP.
-    const rl = rateLimit(`login:${ipDe(req)}`, 5, 10 * 60 * 1000);
+    // Límite: 5 intentos cada 10 minutos por IP (compartido entre instancias).
+    const rl = await rateLimitPersistente(`login:${ipDe(req)}`, 5, 10 * 60 * 1000);
     if (!rl.permitido) {
       const min = Math.ceil(rl.resetEnMs / 60000);
       return error(
@@ -34,8 +35,16 @@ export async function POST(req: NextRequest) {
     // Primer factor. Se comprueba antes de tocar el TOTP para no "consumir" el
     // código (anti-replay) en intentos con el PIN incorrecto. El mensaje de
     // error es el mismo en ambos casos: no revela qué factor ha fallado.
-    // verificarTotp puede lanzar 500 si falta la configuración en producción.
-    if (!pinCorrecto(pin) || !verificarTotp(code)) {
+    if (!pinCorrecto(pin)) {
+      return error('PIN o código de verificación incorrecto.', 401);
+    }
+    // Segundo factor: validez criptográfica + anti-replay (paso ya usado).
+    // comprobarTotp puede lanzar 500 si falta la configuración en producción.
+    const totp = comprobarTotp(code);
+    if (!totp.valido) {
+      return error('PIN o código de verificación incorrecto.', 401);
+    }
+    if (totp.paso !== null && (await pasoTotpYaUsado(totp.paso))) {
       return error('PIN o código de verificación incorrecto.', 401);
     }
 
