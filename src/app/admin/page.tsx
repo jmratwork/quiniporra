@@ -6,6 +6,7 @@ import { Toast, type MensajeToast } from '@/components/Toast';
 import { BotonImprimir } from '@/components/BotonImprimir';
 import { CasillasSignos } from '@/components/CasillasSignos';
 import { Escudo } from '@/components/Escudo';
+import { Select } from '@/components/Select';
 import { SIGNOS_1X2, VALORES_PLENO, type Multiplicidad } from '@/lib/validation';
 
 const CLAVE_PIN = 'quiniporra_pin';
@@ -509,24 +510,25 @@ function PartidoAdminFila({
       {/* Formulario de nueva invitación */}
       {abierto && !apostado && !bloqueado && (
         <div className="mt-3 animate-rise-in space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:ml-[4.75rem]">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch">
             <input
-              className="input flex-1"
+              className="input sm:flex-1"
               placeholder="Nombre del jugador"
               aria-label="Nombre del jugador"
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
             />
-            <select
-              className="input w-auto"
-              aria-label="Multiplicidad"
+            <Select
               value={mult}
-              onChange={(e) => setMult(e.target.value as Mult)}
-            >
-              <option value="SIMPLE">Simple (1 marca)</option>
-              <option value="DOBLE">Doble (2 marcas)</option>
-              <option value="TRIPLE">Triple (3 marcas)</option>
-            </select>
+              onChange={setMult}
+              ariaLabel="Multiplicidad"
+              className="sm:w-44"
+              opciones={[
+                { value: 'SIMPLE', label: 'Simple (1 marca)' },
+                { value: 'DOBLE', label: 'Doble (2 marcas)' },
+                { value: 'TRIPLE', label: 'Triple (3 marcas)' },
+              ]}
+            />
             <button onClick={crearInvitacion} disabled={creando} className="btn-primary">
               {creando ? '…' : 'Generar enlace'}
             </button>
