@@ -1,25 +1,22 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getQuinielaActiva, vistaAdmin, vistaPublica } from '@/lib/quiniela';
-import { extraePin } from '@/lib/auth';
-import { ok, error, manejaError } from '@/lib/http';
+import { tieneSesionAdmin, requiereSesionAdmin } from '@/lib/auth';
+import { ok, manejaError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/quiniela
  * Estado completo de la Quiniela activa.
- *  - Sin PIN: vista pública (sin signos hasta que esté CERRADA, sin tokens).
- *  - Con PIN correcto (x-admin-pin): vista de administración (multiplicidad,
- *    invitaciones y su estado).
+ *  - Sin sesión: vista pública (sin signos hasta que esté CERRADA, sin tokens).
+ *  - Con sesión de administración válida: vista de administración.
  */
 export async function GET(req: NextRequest) {
-  // La autenticación NO depende de la base de datos: se calcula primero, para
-  // que el admin pueda entrar aunque todavía no exista ninguna Quiniela o la
-  // BD no responda (si no, el login mostraría "PIN incorrecto" por error).
-  const pin = extraePin(req);
-  const esAdmin =
-    !!pin && !!process.env.ADMIN_PIN && pin === process.env.ADMIN_PIN;
+  // La autenticación (cookie de sesión) NO depende de la base de datos: se
+  // calcula primero, para que el admin pueda entrar aunque no exista ninguna
+  // Quiniela o la BD no responda.
+  const esAdmin = tieneSesionAdmin(req);
 
   try {
     const q = await getQuinielaActiva();
@@ -28,8 +25,6 @@ export async function GET(req: NextRequest) {
       esAdmin,
     });
   } catch (e) {
-    // Fallo de BD: devolvemos igualmente esAdmin (200) para no bloquear el
-    // login; el panel podrá avisar del problema de base de datos.
     console.error('GET /api/quiniela — error de base de datos:', e);
     return ok({ quiniela: null, esAdmin, errorBd: true });
   }
@@ -38,18 +33,11 @@ export async function GET(req: NextRequest) {
 /**
  * DELETE /api/quiniela
  * Reinicia todo: borra la Quiniela activa (y en cascada partidos,
- * invitaciones y apuestas). Requiere PIN.
+ * invitaciones y apuestas). Requiere sesión de administración.
  */
 export async function DELETE(req: NextRequest) {
   try {
-    // Autenticación por cabecera (DELETE sin cuerpo).
-    const pin = extraePin(req);
-    if (!process.env.ADMIN_PIN) {
-      return error('ADMIN_PIN no está configurado en el servidor.', 500);
-    }
-    if (!pin || pin !== process.env.ADMIN_PIN) {
-      return error('PIN de administración incorrecto.', 401);
-    }
+    requiereSesionAdmin(req);
 
     const activa = await prisma.quiniela.findFirst({
       orderBy: { createdAt: 'desc' },

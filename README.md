@@ -89,17 +89,27 @@ Copia el ejemplo y edítalo:
 cp .env.example .env
 ```
 
-| Variable            | Descripción                                                             |
-| ------------------- | ----------------------------------------------------------------------- |
-| `DATABASE_URL`      | Cadena de conexión a PostgreSQL.                                        |
-| `ADMIN_PIN`         | PIN del panel `/admin`. **Mín. 12 caracteres en producción.**          |
-| `INVITACION_SECRET` | Secreto HMAC para firmar los tokens de invitación. **Oblig. en prod.** |
+| Variable            | Descripción                                                                     |
+| ------------------- | ------------------------------------------------------------------------------- |
+| `DATABASE_URL`      | Cadena de conexión a PostgreSQL.                                                |
+| `ADMIN_PIN`         | PIN del panel `/admin` (primer factor). **Mín. 12 caracteres en producción.**  |
+| `INVITACION_SECRET` | Secreto HMAC para firmar los tokens de invitación. **Oblig. en prod.**         |
+| `SESSION_SECRET`    | Secreto HMAC para firmar la cookie de sesión del admin. **Oblig. en prod.**    |
+| `TOTP_SECRET`       | Secreto base32 del segundo factor (2FA). **Oblig. en prod.** Ver más abajo.     |
 
-Genera un secreto aleatorio:
+Genera un secreto aleatorio (para `INVITACION_SECRET` y `SESSION_SECRET`):
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
+
+Genera el `TOTP_SECRET` del doble factor con:
+
+```bash
+npm run totp:setup   # imprime un QR para escanear y el valor de TOTP_SECRET
+```
+
+Ver la sección [Seguridad del panel: doble factor (2FA)](#seguridad-del-panel-doble-factor-2fa).
 
 ### 4. Crear las tablas
 
@@ -149,7 +159,8 @@ Luego aplica las migraciones: `npx prisma migrate deploy`.
 
 1. Sube el repositorio a GitHub y **importa el proyecto en Vercel**.
 2. Crea/enlaza una base de datos PostgreSQL y define las variables de entorno en
-   Vercel: `DATABASE_URL`, `ADMIN_PIN` (≥ 12 caracteres), `INVITACION_SECRET`.
+   Vercel: `DATABASE_URL`, `ADMIN_PIN` (≥ 12 caracteres), `INVITACION_SECRET`,
+   `SESSION_SECRET` y `TOTP_SECRET` (genera este último con `npm run totp:setup`).
 3. Vercel usará automáticamente el script **`vercel-build`**:
 
    ```
@@ -310,32 +321,61 @@ introducir los 15 partidos a mano si la carga automática falla.
 
 | Método   | Ruta                        | Descripción                                                                 | Auth      |
 | -------- | --------------------------- | --------------------------------------------------------------------------- | --------- |
-| `GET`    | `/api/quiniela`             | Estado completo. Sin PIN → vista pública; con PIN → vista admin.            | parcial   |
-| `DELETE` | `/api/quiniela`             | Reinicia todo (borra la Quiniela activa en cascada).                        | PIN       |
-| `POST`   | `/api/quiniela/iniciar`     | "Iniciar": busca la jornada en SELAE y crea la Quiniela. **502** si falla.  | PIN       |
-| `POST`   | `/api/quiniela/manual`      | Fallback: crear la jornada con los 15 partidos a mano.                      | PIN       |
-| `POST`   | `/api/invitaciones`         | Crea invitación (partido, nombre, multiplicidad). Devuelve el token 1 vez.  | PIN       |
+| `POST`   | `/api/admin/login`          | Doble factor: `{ pin, code }` → emite la cookie de sesión. **429** si abusa. | 2FA       |
+| `POST`   | `/api/admin/logout`         | Cierra la sesión (borra la cookie).                                         | —         |
+| `GET`    | `/api/admin/session`        | `{ autenticado, totpRequerido }` para la pantalla de login.                | —         |
+| `GET`    | `/api/quiniela`             | Estado completo. Sin sesión → vista pública; con sesión → vista admin.     | parcial   |
+| `DELETE` | `/api/quiniela`             | Reinicia todo (borra la Quiniela activa en cascada).                        | sesión    |
+| `POST`   | `/api/quiniela/iniciar`     | "Iniciar": busca la jornada en SELAE y crea la Quiniela. **502** si falla.  | sesión    |
+| `POST`   | `/api/quiniela/manual`      | Fallback: crear la jornada con los 15 partidos a mano.                      | sesión    |
+| `POST`   | `/api/invitaciones`         | Crea invitación (partido, nombre, multiplicidad). Devuelve el token 1 vez.  | sesión    |
 | `GET`    | `/api/invitaciones/[token]` | Datos para la pantalla del jugador. **409** si el partido ya está apostado. | token     |
 | `POST`   | `/api/apuestas`             | Registra la apuesta. **400** si no cumple multiplicidad; **409** si tarde.  | token     |
 | `GET`    | `/api/quiniela/pdf`         | PDF del boleto (solo si `CERRADA`; **409** si no).                          | ninguna   |
 
-### Autenticación del admin
+### Seguridad del panel: doble factor (2FA)
 
-El PIN se envía en la cabecera **`x-admin-pin`** o en el cuerpo como **`pin`**.
-Respuesta **401** si es incorrecto. En producción, `ADMIN_PIN` debe tener al
-menos 12 caracteres o el servidor rechaza el acceso (**500** de configuración).
+El acceso a `/admin` exige **dos factores**:
+
+1. **PIN** (`ADMIN_PIN`) — *algo que sabes*.
+2. **Código TOTP** de 6 dígitos de una app de autenticación (Google
+   Authenticator, Authy, 1Password…) — *algo que tienes*, con `TOTP_SECRET`.
+
+Al superar ambos en `POST /api/admin/login` se emite una **cookie de sesión
+firmada** (HMAC con `SESSION_SECRET`), `httpOnly` + `Secure` + `SameSite=Strict`
+y TTL de 8 h. Las demás rutas de admin ya **no reciben el PIN**: validan esa
+cookie (**401** si falta o caduca). El login está protegido con **rate limiting**
+por IP (5 intentos/10 min → **429**) y con **anti-replay** (un mismo código TOTP
+no se puede usar dos veces). El mensaje de error no revela qué factor ha fallado.
+
+**Enrolamiento (una vez):**
+
+```bash
+npm run totp:setup     # escanea el QR con tu app y copia el TOTP_SECRET
+```
+
+Pon el `TOTP_SECRET` en `.env` (local) y en las variables de entorno de Vercel
+(producción). En **desarrollo**, si `TOTP_SECRET` está vacío, se **omite** el
+segundo factor (solo se pide el PIN) para no bloquear el arranque; en
+**producción** es obligatorio.
 
 ### Ejemplos (`curl`)
 
 ```bash
-# Iniciar la jornada (carga automática desde SELAE)
-curl -X POST http://localhost:3000/api/quiniela/iniciar \
-  -H "x-admin-pin: TU_PIN" -H "Content-Type: application/json" \
-  -d '{"confirmar": true}'
+# 1) Login 2FA: obtén la cookie de sesión (PIN + código de tu app)
+curl -c cookies.txt -X POST http://localhost:3000/api/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{"pin":"TU_PIN","code":"123456"}'
+
+# 2) A partir de aquí, usa la cookie (-b cookies.txt) en las rutas de admin:
+
+# Iniciar la jornada (carga automática)
+curl -b cookies.txt -X POST http://localhost:3000/api/quiniela/iniciar \
+  -H "Content-Type: application/json" -d '{"confirmar": true}'
 
 # Fallback manual: crear la jornada con 15 partidos
-curl -X POST http://localhost:3000/api/quiniela/manual \
-  -H "x-admin-pin: TU_PIN" -H "Content-Type: application/json" \
+curl -b cookies.txt -X POST http://localhost:3000/api/quiniela/manual \
+  -H "Content-Type: application/json" \
   -d '{
     "jornada": "Jornada 34 - 2025/2026",
     "partidos": [
@@ -345,8 +385,8 @@ curl -X POST http://localhost:3000/api/quiniela/manual \
   }'
 
 # Crear una invitación para el partido 3 (doble)
-curl -X POST http://localhost:3000/api/invitaciones \
-  -H "x-admin-pin: TU_PIN" -H "Content-Type: application/json" \
+curl -b cookies.txt -X POST http://localhost:3000/api/invitaciones \
+  -H "Content-Type: application/json" \
   -d '{"numeroPartido":3,"nombreJugador":"Ana","multiplicidad":"DOBLE"}'
 # → { "token": "...", "enlace": "http://localhost:3000/apostar/...", ... }
 

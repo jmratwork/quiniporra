@@ -9,8 +9,6 @@ import { Escudo } from '@/components/Escudo';
 import { Select } from '@/components/Select';
 import { SIGNOS_1X2, VALORES_PLENO, type Multiplicidad } from '@/lib/validation';
 
-const CLAVE_PIN = 'quiniporra_pin';
-
 type Mult = Multiplicidad;
 
 interface InvitacionVista {
@@ -54,6 +52,9 @@ const badgeInv: Record<InvitacionVista['estado'], string> = {
 
 export default function AdminPage() {
   const [pin, setPin] = useState('');
+  const [code, setCode] = useState('');
+  const [totpRequerido, setTotpRequerido] = useState(true);
+  const [comprobandoSesion, setComprobandoSesion] = useState(true);
   const [autenticado, setAutenticado] = useState(false);
   const [quiniela, setQuiniela] = useState<QuinielaAdmin | null>(null);
   const [cargando, setCargando] = useState(false);
@@ -61,17 +62,16 @@ export default function AdminPage() {
   const [modoManual, setModoManual] = useState(false);
   const [toast, setToast] = useState<MensajeToast | null>(null);
 
-  const cargar = useCallback(async (pinUsar: string): Promise<boolean> => {
-    setCargando(true);
+  // Carga el estado de la quiniela. La autenticación va por cookie de sesión
+  // (no se envía el PIN en cada petición). Si la sesión ya no es válida,
+  // esAdmin llega como false y volvemos a la pantalla de login.
+  const cargar = useCallback(async (): Promise<void> => {
     try {
-      const res = await fetch('/api/quiniela', {
-        headers: { 'x-admin-pin': pinUsar },
-        cache: 'no-store',
-      });
+      const res = await fetch('/api/quiniela', { cache: 'no-store' });
       const json = await res.json();
       if (!json.esAdmin) {
-        setToast({ tipo: 'error', texto: 'PIN incorrecto.' });
-        return false;
+        setAutenticado(false);
+        return;
       }
       setQuiniela(json.quiniela ?? null);
       if (json.errorBd) {
@@ -81,40 +81,69 @@ export default function AdminPage() {
             'Sesión iniciada, pero la base de datos no responde. Revisa DATABASE_URL y las migraciones.',
         });
       }
-      return true;
     } catch {
       setToast({ tipo: 'error', texto: 'No se pudo conectar con el servidor.' });
-      return false;
-    } finally {
-      setCargando(false);
     }
   }, []);
 
-  // Restaura sesión si había PIN guardado.
+  // Al montar: ¿hay ya una sesión válida? ¿se exige el segundo factor?
   useEffect(() => {
-    const guardado = sessionStorage.getItem(CLAVE_PIN);
-    if (guardado) {
-      setPin(guardado);
-      cargar(guardado).then((ok) => {
-        if (ok) setAutenticado(true);
-        else sessionStorage.removeItem(CLAVE_PIN);
-      });
-    }
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/session', { cache: 'no-store' });
+        const json = await res.json();
+        setTotpRequerido(!!json.totpRequerido);
+        if (json.autenticado) {
+          setAutenticado(true);
+          await cargar();
+        }
+      } catch {
+        /* pantalla de login */
+      } finally {
+        setComprobandoSesion(false);
+      }
+    })();
   }, [cargar]);
+
+  function sesionExpirada() {
+    setAutenticado(false);
+    setQuiniela(null);
+    setToast({ tipo: 'error', texto: 'Tu sesión ha caducado. Vuelve a entrar.' });
+  }
 
   async function login(e: React.FormEvent) {
     e.preventDefault();
-    const ok = await cargar(pin);
-    if (ok) {
-      sessionStorage.setItem(CLAVE_PIN, pin);
+    setCargando(true);
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin, code }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast({
+          tipo: 'error',
+          texto: json.error ?? 'PIN o código de verificación incorrecto.',
+        });
+        return;
+      }
+      setPin('');
+      setCode('');
       setAutenticado(true);
+      await cargar();
+    } catch {
+      setToast({ tipo: 'error', texto: 'No se pudo conectar con el servidor.' });
+    } finally {
+      setCargando(false);
     }
   }
 
-  function salir() {
-    sessionStorage.removeItem(CLAVE_PIN);
+  async function salir() {
+    await fetch('/api/admin/logout', { method: 'POST' }).catch(() => {});
     setAutenticado(false);
     setPin('');
+    setCode('');
     setQuiniela(null);
   }
 
@@ -124,9 +153,10 @@ export default function AdminPage() {
     try {
       const res = await fetch('/api/quiniela/iniciar', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-pin': pin },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirmar }),
       });
+      if (res.status === 401) return sesionExpirada();
       const json = await res.json();
       if (res.status === 409) {
         if (
@@ -152,7 +182,7 @@ export default function AdminPage() {
         return;
       }
       setToast({ tipo: 'exito', texto: 'Jornada cargada correctamente.' });
-      await cargar(pin);
+      await cargar();
     } finally {
       setIniciando(false);
     }
@@ -163,9 +193,10 @@ export default function AdminPage() {
     try {
       const res = await fetch('/api/quiniela/manual', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-pin': pin },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...datos, confirmar }),
       });
+      if (res.status === 401) return sesionExpirada();
       const json = await res.json();
       if (res.status === 409) {
         if (confirm('Ya existe una Quiniela activa. ¿Reemplazarla?')) {
@@ -180,7 +211,7 @@ export default function AdminPage() {
       }
       setToast({ tipo: 'exito', texto: 'Jornada creada manualmente.' });
       setModoManual(false);
-      await cargar(pin);
+      await cargar();
     } finally {
       setIniciando(false);
     }
@@ -188,10 +219,8 @@ export default function AdminPage() {
 
   async function reiniciar() {
     if (!confirm('¿Borrar la Quiniela activa y todas sus apuestas?')) return;
-    const res = await fetch('/api/quiniela', {
-      method: 'DELETE',
-      headers: { 'x-admin-pin': pin },
-    });
+    const res = await fetch('/api/quiniela', { method: 'DELETE' });
+    if (res.status === 401) return sesionExpirada();
     if (res.ok) {
       setQuiniela(null);
       setToast({ tipo: 'info', texto: 'Quiniela reiniciada.' });
@@ -200,7 +229,16 @@ export default function AdminPage() {
     }
   }
 
-  // --- Login ---
+  // --- Comprobando sesión inicial ---
+  if (comprobandoSesion) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <p className="animate-pulse text-cesped-300">Comprobando sesión…</p>
+      </div>
+    );
+  }
+
+  // --- Login (doble factor: PIN + código TOTP) ---
   if (!autenticado) {
     return (
       <div className="mx-auto max-w-sm animate-rise-in">
@@ -208,7 +246,11 @@ export default function AdminPage() {
           <div className="text-center">
             <div className="text-4xl">🔒</div>
             <h1 className="mt-2 text-xl font-black text-white">Panel de administración</h1>
-            <p className="mt-1 text-sm text-slate-400">Introduce el PIN para continuar.</p>
+            <p className="mt-1 text-sm text-slate-400">
+              {totpRequerido
+                ? 'Introduce el PIN y el código de tu app de autenticación.'
+                : 'Introduce el PIN para continuar.'}
+            </p>
           </div>
           <div>
             <label className="label" htmlFor="pin">
@@ -217,6 +259,7 @@ export default function AdminPage() {
             <input
               id="pin"
               type="password"
+              autoComplete="current-password"
               className="input"
               placeholder="••••••••••••"
               value={pin}
@@ -224,7 +267,31 @@ export default function AdminPage() {
               autoFocus
             />
           </div>
-          <button type="submit" disabled={cargando} className="btn-primary w-full">
+          {totpRequerido && (
+            <div>
+              <label className="label" htmlFor="code">
+                Código de verificación
+              </label>
+              <input
+                id="code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                className="input text-center text-2xl font-black tracking-[0.4em] tabular-nums"
+                placeholder="000000"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              />
+              <p className="mt-1.5 text-xs text-slate-500">
+                Código de 6 dígitos de Google Authenticator, Authy, 1Password…
+              </p>
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={cargando || !pin || (totpRequerido && code.length !== 6)}
+            className="btn-primary w-full"
+          >
             {cargando ? 'Comprobando…' : 'Entrar'}
           </button>
         </form>
@@ -334,9 +401,9 @@ export default function AdminPage() {
               <PartidoAdminFila
                 key={p.numero}
                 partido={p}
-                pin={pin}
                 bloqueado={cerrada}
-                onCambio={() => cargar(pin)}
+                onCambio={cargar}
+                onSesionExpirada={sesionExpirada}
                 onToast={setToast}
               />
             ))}
@@ -355,15 +422,15 @@ export default function AdminPage() {
 
 function PartidoAdminFila({
   partido,
-  pin,
   bloqueado,
   onCambio,
+  onSesionExpirada,
   onToast,
 }: {
   partido: PartidoAdmin;
-  pin: string;
   bloqueado: boolean;
   onCambio: () => void;
+  onSesionExpirada: () => void;
   onToast: (m: MensajeToast) => void;
 }) {
   const [abierto, setAbierto] = useState(false);
@@ -381,13 +448,17 @@ function PartidoAdminFila({
     try {
       const res = await fetch('/api/invitaciones', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-pin': pin },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           numeroPartido: partido.numero,
           nombreJugador: nombre.trim(),
           multiplicidad: mult,
         }),
       });
+      if (res.status === 401) {
+        onSesionExpirada();
+        return;
+      }
       const json = await res.json();
       if (!res.ok) {
         onToast({ tipo: 'error', texto: json.error ?? 'No se pudo crear la invitación.' });

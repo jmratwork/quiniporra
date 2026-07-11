@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { verificaAdmin } from '@/lib/auth';
+import { requiereSesionAdmin } from '@/lib/auth';
 import { obtenerJornadaActual } from '@/lib/jornadaFetcher';
 import { ok, error, manejaError } from '@/lib/http';
 
@@ -20,8 +20,8 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   try {
+    requiereSesionAdmin(req);
     const body = await req.json().catch(() => ({}));
-    verificaAdmin(req, body);
 
     const confirmar = body?.confirmar === true;
 

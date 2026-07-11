@@ -1,14 +1,19 @@
 import { NextRequest } from 'next/server';
+import { COOKIE_SESION, sesionValida } from './session';
 
 /**
- * Autenticación del panel de administración mediante PIN.
+ * Autenticación del panel de administración.
  *
- * El PIN se lee de la variable de entorno ADMIN_PIN. Se acepta:
- *   - Cabecera `x-admin-pin`
- *   - Campo `pin` en el cuerpo JSON de la petición
+ * Doble factor:
+ *   1. PIN (algo que sabes)      → variable de entorno ADMIN_PIN.
+ *   2. Código TOTP (algo que tienes) → ver lib/totp.ts.
  *
- * En producción el PIN debe tener al menos 12 caracteres; si no, se
- * considera mal configurado y se rechaza cualquier acceso.
+ * Una vez superados ambos en /api/admin/login se emite una cookie de sesión
+ * firmada (lib/session.ts). Las rutas protegidas ya NO reciben el PIN en cada
+ * petición: validan esa cookie con requiereSesionAdmin().
+ *
+ * En producción el PIN debe tener al menos 12 caracteres; si no, se considera
+ * mal configurado y se rechaza cualquier acceso.
  */
 
 const PIN_MINIMO_PRODUCCION = 12;
@@ -40,9 +45,7 @@ function pinConfigurado(): string {
   return pin;
 }
 
-/**
- * Comparación en tiempo constante para evitar ataques de temporización.
- */
+/** Comparación en tiempo constante para evitar ataques de temporización. */
 function comparaSeguro(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let resultado = 0;
@@ -52,34 +55,20 @@ function comparaSeguro(a: string, b: string): boolean {
   return resultado === 0;
 }
 
-/**
- * Extrae el PIN de la cabecera o del cuerpo ya parseado.
- */
-export function extraePin(
-  req: NextRequest,
-  body?: unknown,
-): string | null {
-  const cabecera = req.headers.get('x-admin-pin');
-  if (cabecera && cabecera.length > 0) return cabecera;
-  if (
-    body &&
-    typeof body === 'object' &&
-    'pin' in body &&
-    typeof (body as { pin: unknown }).pin === 'string'
-  ) {
-    return (body as { pin: string }).pin;
-  }
-  return null;
+/** Primer factor: ¿el PIN recibido es correcto? (usado solo en el login) */
+export function pinCorrecto(pin: string): boolean {
+  const esperado = pinConfigurado();
+  return typeof pin === 'string' && comparaSeguro(pin, esperado);
 }
 
-/**
- * Verifica el PIN de admin. Lanza AdminAuthError(401) si es incorrecto
- * o AdminAuthError(500) si el servidor está mal configurado.
- */
-export function verificaAdmin(req: NextRequest, body?: unknown): void {
-  const esperado = pinConfigurado();
-  const recibido = extraePin(req, body);
-  if (!recibido || !comparaSeguro(recibido, esperado)) {
-    throw new AdminAuthError(401, 'PIN de administración incorrecto.');
+/** ¿La petición trae una cookie de sesión de administración válida? */
+export function tieneSesionAdmin(req: NextRequest): boolean {
+  return sesionValida(req.cookies.get(COOKIE_SESION)?.value);
+}
+
+/** Exige sesión de administración válida; lanza AdminAuthError(401) si no. */
+export function requiereSesionAdmin(req: NextRequest): void {
+  if (!tieneSesionAdmin(req)) {
+    throw new AdminAuthError(401, 'Sesión de administración no válida o caducada.');
   }
 }
