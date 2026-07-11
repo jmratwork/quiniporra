@@ -52,6 +52,7 @@ const badgeInv: Record<InvitacionVista['estado'], string> = {
 export default function AdminPage() {
   const [pin, setPin] = useState('');
   const [code, setCode] = useState('');
+  const [pasoLogin, setPasoLogin] = useState<'pin' | 'codigo'>('pin');
   const [totpRequerido, setTotpRequerido] = useState(true);
   const [comprobandoSesion, setComprobandoSesion] = useState(true);
   const [autenticado, setAutenticado] = useState(false);
@@ -102,31 +103,46 @@ export default function AdminPage() {
     })();
   }, [cargar]);
 
+  function reiniciarLogin() {
+    setPin('');
+    setCode('');
+    setPasoLogin('pin');
+  }
+
   function sesionExpirada() {
     setAutenticado(false);
     setQuiniela(null);
+    reiniciarLogin();
     setToast({ tipo: 'error', texto: 'Tu sesión ha caducado. Vuelve a entrar.' });
   }
 
+  /** Envía el login. Paso 1: solo el PIN. Paso 2: PIN + código de verificación. */
   async function login(e: React.FormEvent) {
     e.preventDefault();
     setCargando(true);
     try {
+      const cuerpo = pasoLogin === 'pin' ? { pin } : { pin, code };
       const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin, code }),
+        body: JSON.stringify(cuerpo),
       });
       const json = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        setToast({
-          tipo: 'error',
-          texto: json.error ?? 'PIN o código de verificación incorrecto.',
-        });
+        setToast({ tipo: 'error', texto: json.error ?? 'No se pudo iniciar sesión.' });
+        if (pasoLogin === 'codigo') setCode('');
         return;
       }
-      setPin('');
-      setCode('');
+
+      // PIN correcto pero falta el segundo factor -> pasamos al paso del código.
+      if (json.requiereCodigo) {
+        setPasoLogin('codigo');
+        return;
+      }
+
+      // Autenticado (2FA completado, o desactivado en desarrollo).
+      reiniciarLogin();
       setAutenticado(true);
       await cargar();
     } catch {
@@ -139,9 +155,8 @@ export default function AdminPage() {
   async function salir() {
     await fetch('/api/admin/logout', { method: 'POST' }).catch(() => {});
     setAutenticado(false);
-    setPin('');
-    setCode('');
     setQuiniela(null);
+    reiniciarLogin();
   }
 
 
@@ -166,36 +181,39 @@ export default function AdminPage() {
     );
   }
 
-  // --- Login (doble factor: PIN + código TOTP) ---
+  // --- Login en dos pasos: 1) PIN, 2) código TOTP (solo si el PIN es correcto) ---
   if (!autenticado) {
+    const enPaso1 = pasoLogin === 'pin';
     return (
       <div className="mx-auto max-w-sm animate-rise-in">
         <form onSubmit={login} className="card space-y-5 p-6 sm:p-7">
           <div className="text-center">
-            <div className="text-4xl">🔒</div>
+            <div className="text-4xl">{enPaso1 ? '🔒' : '🔑'}</div>
             <h1 className="mt-2 text-xl font-black text-white">Panel de administración</h1>
             <p className="mt-1 text-sm text-slate-400">
-              {totpRequerido
-                ? 'Introduce el PIN y el código de tu app de autenticación.'
-                : 'Introduce el PIN para continuar.'}
+              {enPaso1
+                ? 'Introduce el PIN para continuar.'
+                : 'PIN correcto. Ahora el código de tu app de autenticación.'}
             </p>
           </div>
-          <div>
-            <label className="label" htmlFor="pin">
-              PIN de administración
-            </label>
-            <input
-              id="pin"
-              type="password"
-              autoComplete="current-password"
-              className="input"
-              placeholder="••••••••••••"
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              autoFocus
-            />
-          </div>
-          {totpRequerido && (
+
+          {enPaso1 ? (
+            <div>
+              <label className="label" htmlFor="pin">
+                PIN de administración
+              </label>
+              <input
+                id="pin"
+                type="password"
+                autoComplete="current-password"
+                className="input"
+                placeholder="••••••••••••"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                autoFocus
+              />
+            </div>
+          ) : (
             <div>
               <label className="label" htmlFor="code">
                 Código de verificación
@@ -209,19 +227,34 @@ export default function AdminPage() {
                 placeholder="000000"
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                autoFocus
               />
               <p className="mt-1.5 text-xs text-slate-500">
                 Código de 6 dígitos de Google Authenticator, Authy, 1Password…
               </p>
             </div>
           )}
+
           <button
             type="submit"
-            disabled={cargando || !pin || (totpRequerido && code.length !== 6)}
+            disabled={
+              cargando ||
+              (enPaso1 ? pin.length === 0 : code.length !== 6)
+            }
             className="btn-primary w-full"
           >
-            {cargando ? 'Comprobando…' : 'Entrar'}
+            {cargando ? 'Comprobando…' : enPaso1 ? 'Continuar' : 'Entrar'}
           </button>
+
+          {!enPaso1 && (
+            <button
+              type="button"
+              onClick={reiniciarLogin}
+              className="w-full text-center text-xs font-medium text-slate-400 transition hover:text-cesped-300"
+            >
+              ← Volver a introducir el PIN
+            </button>
+          )}
         </form>
         <Toast mensaje={toast} onClose={() => setToast(null)} />
       </div>
