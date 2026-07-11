@@ -45,7 +45,7 @@ export default function RootLayout({
         <main className="mx-auto max-w-5xl px-4 py-6 sm:py-8">{children}</main>
 
         <footer className="mx-auto max-w-5xl px-4 py-10 text-center text-xs text-slate-500">
-          quiniporra · porra colaborativa de La Quiniela · software libre
+          quiniporra · porra colaborativa de La Quiniela
         </footer>
       </body>
     </html>
