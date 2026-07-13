@@ -366,8 +366,8 @@ veces.
 La jornada se carga **automáticamente** mediante un **cron de Vercel** que llama
 a `GET /api/cron/jornada` (ver `vercel.json`):
 
-- **Domingo** a las 18:00 (hora de Barcelona) — jornada de entresemana.
-- **Jueves** a las 18:00 (hora de Barcelona) — jornada de fin de semana.
+- **Lunes** a las 10:00 (hora de Barcelona) — jornada de entresemana.
+- **Viernes** a las 10:00 (hora de Barcelona) — jornada de fin de semana.
 
 Así, tanto la página de inicio pública como el panel muestran la jornada sin
 que nadie tenga que iniciarla a mano. La carga es **idempotente y no
@@ -383,9 +383,9 @@ destructiva** (`src/lib/cargaJornada.ts`):
 
 El endpoint está protegido con `CRON_SECRET` (Vercel envía
 `Authorization: Bearer <CRON_SECRET>`). **Zona horaria:** Vercel programa los
-crons en **UTC**; están fijados a las **17:00 UTC** (= 18:00 en horario de
+crons en **UTC**; están fijados a las **09:00 UTC** (= 10:00 en horario de
 invierno CET, el grueso de la temporada). En horario de verano (CEST) se
-dispararían a las 19:00 locales; como la carga es idempotente, el pequeño
+dispararían a las 11:00 locales; como la carga es idempotente, el pequeño
 desfase es inocuo. Ajusta `vercel.json` si quieres exactitud todo el año.
 
 ### Limitaciones (importante)

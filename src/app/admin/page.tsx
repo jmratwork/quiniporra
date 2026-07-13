@@ -275,8 +275,8 @@ export default function AdminPage() {
           <h2 className="text-lg font-black text-white">Aún no hay jornada activa</h2>
           <p className="mx-auto max-w-md text-sm text-slate-400">
             La jornada de La Quiniela se carga <strong>automáticamente</strong> los
-            <strong> domingos</strong> (entresemana) y los <strong>jueves</strong> (fin de
-            semana) a las <strong>18:00</strong> (hora de Barcelona). Aparecerá aquí y en
+            <strong> lunes</strong> (entresemana) y los <strong>viernes</strong> (fin de
+            semana) a las <strong>10:00</strong> (hora de Barcelona). Aparecerá aquí y en
             la página de inicio en cuanto se cargue.
           </p>
         </section>

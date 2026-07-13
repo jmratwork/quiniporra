@@ -6,8 +6,8 @@ export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/cron/jornada
- * Carga automática de la jornada actual. La invoca el cron de Vercel (domingos
- * y jueves a las 18:00 de Barcelona, ver vercel.json).
+ * Carga automática de la jornada actual. La invoca el cron de Vercel (lunes y
+ * viernes a las 10:00 de Barcelona, ver vercel.json).
  *
  * Autenticación: cabecera `Authorization: Bearer <CRON_SECRET>` que Vercel añade
  * automáticamente cuando `CRON_SECRET` está definido. En producción es
