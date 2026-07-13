@@ -366,7 +366,7 @@ veces.
 La jornada se carga **automáticamente** mediante un **cron de Vercel** que llama
 a `GET /api/cron/jornada` (ver `vercel.json`):
 
-- **Lunes** a las 18:00 (hora de Barcelona) — jornada de entresemana.
+- **Domingo** a las 18:00 (hora de Barcelona) — jornada de entresemana.
 - **Jueves** a las 18:00 (hora de Barcelona) — jornada de fin de semana.
 
 Así, tanto la página de inicio pública como el panel muestran la jornada sin

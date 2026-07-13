@@ -4,7 +4,7 @@ import { obtenerJornadaActual } from './jornadaFetcher';
 /**
  * Carga automática (programada) de la jornada actual de La Quiniela.
  *
- * Se dispara desde un cron (lunes y jueves a las 18:00 de Barcelona, ver
+ * Se dispara desde un cron (domingos y jueves a las 18:00 de Barcelona, ver
  * vercel.json) y también podría llamarse manualmente. Es **idempotente y NO
  * destructiva**: nunca borra una porra en curso.
  *
