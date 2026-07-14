@@ -116,12 +116,18 @@ export default function AdminPage() {
     setToast({ tipo: 'error', texto: 'Tu sesión ha caducado. Vuelve a entrar.' });
   }
 
-  /** Envía el login. Paso 1: solo el PIN. Paso 2: PIN + código de verificación. */
-  async function login(e: React.FormEvent) {
-    e.preventDefault();
+  /**
+   * Envía el login. Paso 1: solo el PIN. Paso 2: PIN + código de verificación.
+   * `codeOverride` permite enviar el código en el mismo instante en que se
+   * completa (auto-envío al 6.º dígito), sin esperar al estado.
+   */
+  async function login(e?: React.FormEvent, codeOverride?: string) {
+    e?.preventDefault();
+    if (cargando) return; // evita envíos duplicados (botón + auto-envío)
     setCargando(true);
     try {
-      const cuerpo = pasoLogin === 'pin' ? { pin } : { pin, code };
+      const codigo = codeOverride ?? code;
+      const cuerpo = pasoLogin === 'pin' ? { pin } : { pin, code: codigo };
       const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -226,7 +232,12 @@ export default function AdminPage() {
                 className="input text-center text-2xl font-black tracking-[0.4em] tabular-nums"
                 placeholder="000000"
                 value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/\D/g, '').slice(0, 6);
+                  setCode(v);
+                  // Auto-envío al completar los 6 dígitos (sin pulsar "Entrar").
+                  if (v.length === 6) login(undefined, v);
+                }}
                 autoFocus
               />
               <p className="mt-1.5 text-xs text-slate-500">
