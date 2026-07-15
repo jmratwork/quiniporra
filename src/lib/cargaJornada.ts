@@ -1,5 +1,6 @@
 import { prisma } from './prisma';
 import { obtenerJornadaActual } from './jornadaFetcher';
+import { archivarQuiniela } from './historico';
 
 /**
  * Carga automática (programada) de la jornada actual de La Quiniela.
@@ -67,6 +68,8 @@ export async function cargarJornadaAutomatica(): Promise<ResultadoCarga> {
 
   await prisma.$transaction(async (tx) => {
     if (accion === 'reemplazar' && existente) {
+      // M4: archiva el boleto anterior (si tenía apuestas) antes de borrarlo.
+      await archivarQuiniela(tx, existente.id);
       await tx.quiniela.delete({ where: { id: existente.id } });
     }
     await tx.quiniela.create({

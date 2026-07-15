@@ -49,6 +49,15 @@ const badgeInv: Record<InvitacionVista['estado'], string> = {
   ANULADA: 'bg-white/[0.06] text-slate-500 ring-white/10',
 };
 
+interface HistoricoItem {
+  id: string;
+  jornada: string;
+  fechaCierre: string | null;
+  estado: 'ABIERTA' | 'CERRADA' | 'CADUCADA';
+  apostados: number;
+  archivadaEn: string;
+}
+
 export default function AdminPage() {
   const [pin, setPin] = useState('');
   const [code, setCode] = useState('');
@@ -57,6 +66,7 @@ export default function AdminPage() {
   const [comprobandoSesion, setComprobandoSesion] = useState(true);
   const [autenticado, setAutenticado] = useState(false);
   const [quiniela, setQuiniela] = useState<QuinielaAdmin | null>(null);
+  const [historicos, setHistoricos] = useState<HistoricoItem[]>([]);
   const [cargando, setCargando] = useState(false);
   const [toast, setToast] = useState<MensajeToast | null>(null);
 
@@ -78,6 +88,16 @@ export default function AdminPage() {
           texto:
             'Sesión iniciada, pero la base de datos no responde. Revisa DATABASE_URL y las migraciones.',
         });
+      }
+      // Boletos de jornadas anteriores archivadas (best-effort).
+      try {
+        const rh = await fetch('/api/admin/historico', { cache: 'no-store' });
+        if (rh.ok) {
+          const jh = await rh.json();
+          setHistoricos(jh.historicos ?? []);
+        }
+      } catch {
+        /* ignorar: el histórico es secundario */
       }
     } catch {
       setToast({ tipo: 'error', texto: 'No se pudo conectar con el servidor.' });
@@ -369,6 +389,35 @@ export default function AdminPage() {
                 onSesionExpirada={sesionExpirada}
                 onToast={setToast}
               />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Boletos de jornadas anteriores (archivados) */}
+      {historicos.length > 0 && (
+        <section className="card overflow-hidden">
+          <div className="border-b border-white/10 px-4 py-3 text-xs font-bold uppercase tracking-wide text-slate-400">
+            Boletos anteriores
+          </div>
+          <div className="divide-y divide-white/5">
+            {historicos.map((h) => (
+              <div key={h.id} className="flex items-center gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-bold text-white">{h.jornada}</div>
+                  <div className="text-[11px] text-slate-500">
+                    {h.estado.toLowerCase()} · {h.apostados}/15 apostados · archivado{' '}
+                    {new Date(h.archivadaEn).toLocaleDateString('es-ES')}
+                  </div>
+                </div>
+                <a
+                  href={`/api/admin/historico/${h.id}/pdf`}
+                  download
+                  className="btn-ghost px-3 py-1.5 text-xs"
+                >
+                  PDF
+                </a>
+              </div>
             ))}
           </div>
         </section>

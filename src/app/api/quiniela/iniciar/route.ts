@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requiereSesionAdmin } from '@/lib/auth';
 import { obtenerJornadaActual } from '@/lib/jornadaFetcher';
+import { archivarQuiniela } from '@/lib/historico';
 import { ok, error, manejaError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
@@ -40,7 +41,8 @@ export async function POST(req: NextRequest) {
 
     const creada = await prisma.$transaction(async (tx) => {
       if (existente) {
-        // Borra la anterior en cascada (partidos, invitaciones, apuestas).
+        // Archiva el boleto anterior (si tenía apuestas) y borra en cascada.
+        await archivarQuiniela(tx, existente.id);
         await tx.quiniela.delete({ where: { id: existente.id } });
       }
       return tx.quiniela.create({

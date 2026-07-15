@@ -114,6 +114,23 @@ model TotpStep {
   @@map("totp_step")
 }
 
+/// Histórico de jornadas terminadas. Antes de reemplazar/borrar una Quiniela con
+/// apuestas, se guarda aquí un snapshot (JSON compatible con el generador de PDF)
+/// para no perder el boleto. (M4)
+model HistoricoQuiniela {
+  id          String         @id @default(cuid())
+  jornada     String
+  fechaCierre DateTime?
+  estado      EstadoQuiniela
+  apostados   Int
+  /// { jornada, fechaCierre, partidos: [{ numero, local, visitante, esPleno, signos, nombreJugador }] }
+  snapshot    Json
+  archivadaEn DateTime       @default(now())
+
+  @@index([archivadaEn])
+  @@map("historicos_quiniela")
+}
+
 /// Apuesta registrada para un partido. La restricción única sobre
 /// (quinielaId, numeroPartido) garantiza "una sola apuesta por partido"
 /// a nivel de base de datos y evita condiciones de carrera.

@@ -376,10 +376,18 @@ destructiva** (`src/lib/cargaJornada.ts`):
 - Si no hay jornada → la crea.
 - Si ya está cargada la misma jornada → no hace nada.
 - Si la jornada anterior ya terminó (`CERRADA`/`CADUCADA` o pasada su
-  `fechaCierre`) → la reemplaza por la nueva.
+  `fechaCierre`) → la **archiva** (ver abajo) y la reemplaza por la nueva.
 - Si hay una porra **ABIERTA en curso** (distinta jornada, aún en plazo) → **no
   la toca** (no se destruyen apuestas a medias); se reintenta en el siguiente
   disparo.
+
+**Archivo de boletos (no se pierde nada).** Antes de reemplazar/borrar una
+jornada que tenga apuestas, se guarda un *snapshot* en la tabla
+`historicos_quiniela` (compatible con el generador de PDF). Así, aunque el cron
+reemplace una jornada `CERRADA` antes de que nadie descargue su boleto, queda
+consultable desde el panel de admin (**Boletos anteriores**) y se puede
+regenerar su PDF en `/api/admin/historico/[id]/pdf`. Aplica también a los
+reemplazos manuales (`iniciar`/`manual`).
 
 El endpoint está protegido con `CRON_SECRET` (Vercel envía
 `Authorization: Bearer <CRON_SECRET>`). **Zona horaria:** Vercel programa los
@@ -449,6 +457,8 @@ desfase es inocuo. Ajusta `vercel.json` si quieres exactitud todo el año.
 | `POST`   | `/api/apuestas`             | Registra la apuesta. **400** multiplicidad; **409** tarde/caducada; **429**. | token     |
 | `GET`    | `/api/quiniela/pdf`         | PDF del boleto (solo si `CERRADA`; **409** si no).                          | ninguna   |
 | `GET`    | `/api/cron/jornada`         | Carga automática de la jornada (idempotente, no destructiva). **502** si falla la fuente. | cron      |
+| `GET`    | `/api/admin/historico`      | Lista los boletos de jornadas anteriores archivadas.                        | sesión    |
+| `GET`    | `/api/admin/historico/[id]/pdf` | PDF de un boleto archivado (regenerado desde su snapshot).              | sesión    |
 
 ### Seguridad del panel: doble factor (2FA)
 
