@@ -39,6 +39,8 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // No revelar el framework en la cabecera X-Powered-By.
+  poweredByHeader: false,
   // En Next 15 los paquetes que solo funcionan en servidor se declaran aquí
   // (antes estaba en experimental.serverComponentsExternalPackages).
   serverExternalPackages: ['@prisma/client', 'pdf-lib'],

@@ -1,21 +1,23 @@
 import { prisma } from './prisma';
+import { rateLimit as rateLimitMemoria } from './rateLimit';
 
 /**
  * Estado de autenticación COMPARTIDO entre instancias serverless (Postgres).
  *
  * En Vercel cada función puede correr en instancias distintas y reiniciarse en
  * frío, así que un contador en memoria no sirve para el rate limiting ni para
- * el anti-replay del TOTP (M3), ni para revocar sesiones (M4). Aquí se persiste
- * en BD.
+ * el anti-replay del TOTP, ni para revocar sesiones. Aquí se persiste en BD.
  *
- * Todas las funciones son **fail-open** ante un error de BD: si la base de datos
- * no responde, no se bloquea el login (se registra un aviso). Es una decisión
- * de disponibilidad para un panel de un solo admin; la seguridad de fondo sigue
- * recayendo en PIN + TOTP + cookie firmada.
+ * Modo de fallo ante error de BD (diferenciado por función):
+ *  - `rateLimitPersistente`: **fail-safe** → cae al limitador EN MEMORIA (al
+ *    menos protege por instancia), nunca deja el login sin ningún límite.
+ *  - `pasoTotpYaUsado` / `sesionRevocada`: **fail-open** (bajo impacto: el
+ *    anti-replay solo dejaría reenviar el MISMO código, no probar nuevos; y una
+ *    revocación no aplicada caduca sola en ≤8 h).
  */
 
 // ---------------------------------------------------------------------------
-// M3 — Rate limiting persistente (ventana fija)
+// Rate limiting persistente (ventana fija), atómico y sin condición de carrera
 // ---------------------------------------------------------------------------
 
 export interface ResultadoRate {
@@ -29,29 +31,32 @@ export async function rateLimitPersistente(
   ventanaMs: number,
 ): Promise<ResultadoRate> {
   const ahora = Date.now();
+  const reset = new Date(ahora + ventanaMs);
   try {
-    return await prisma.$transaction(async (tx) => {
-      const row = await tx.rateLimit.findUnique({ where: { clave } });
-      if (!row || row.reset.getTime() < ahora) {
-        const reset = new Date(ahora + ventanaMs);
-        await tx.rateLimit.upsert({
-          where: { clave },
-          create: { clave, contador: 1, reset },
-          update: { contador: 1, reset },
-        });
-        return { permitido: true, resetEnMs: ventanaMs };
-      }
-      const resetEnMs = row.reset.getTime() - ahora;
-      if (row.contador >= max) return { permitido: false, resetEnMs };
-      await tx.rateLimit.update({
-        where: { clave },
-        data: { contador: { increment: 1 } },
-      });
-      return { permitido: true, resetEnMs };
-    });
+    // Check-and-increment ATÓMICO en una sola sentencia (UPSERT con CASE), para
+    // evitar el TOCTOU del patrón "leer -> decidir -> escribir": peticiones
+    // concurrentes ya no pueden colar más intentos que el límite. La comparación
+    // de la ventana usa now() del propio Postgres. Parametrizado (sin inyección).
+    const filas = await prisma.$queryRaw<{ contador: number; reset: Date }[]>`
+      INSERT INTO "rate_limits" ("clave", "contador", "reset")
+      VALUES (${clave}, 1, ${reset})
+      ON CONFLICT ("clave") DO UPDATE SET
+        "contador" = CASE WHEN "rate_limits"."reset" < now()
+                          THEN 1 ELSE "rate_limits"."contador" + 1 END,
+        "reset"    = CASE WHEN "rate_limits"."reset" < now()
+                          THEN ${reset} ELSE "rate_limits"."reset" END
+      RETURNING "contador", "reset";
+    `;
+    const fila = filas[0];
+    const contador = Number(fila.contador);
+    const resetEnMs = Math.max(0, fila.reset.getTime() - ahora);
+    return { permitido: contador <= max, resetEnMs };
   } catch (e) {
-    console.warn('[authStore] rate limit no disponible (fail-open):', e);
-    return { permitido: true, resetEnMs: 0 };
+    // Fail-SAFE: si la BD no responde, no dejamos el login sin límite; usamos el
+    // limitador en memoria (protección por instancia) como segunda capa.
+    console.warn('[authStore] rate limit BD no disponible; fallback en memoria:', e);
+    const r = rateLimitMemoria(clave, max, ventanaMs);
+    return { permitido: r.permitido, resetEnMs: r.resetEnMs };
   }
 }
 
@@ -107,5 +112,24 @@ export async function revocarJti(jti: string, expiraEn: Date): Promise<void> {
     await prisma.sesionRevocada.deleteMany({ where: { expiraEn: { lt: new Date() } } });
   } catch (e) {
     console.warn('[authStore] no se pudo revocar la sesión:', e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Poda de tablas de estado (evita crecimiento sin límite)
+// ---------------------------------------------------------------------------
+
+/**
+ * Borra las filas caducadas de `sesiones_revocadas` (ya expiradas) y de
+ * `rate_limits` (ventana ya vencida). Se llama de forma oportunista desde el
+ * cron. Best-effort: un fallo de BD no interrumpe nada.
+ */
+export async function podarEstadoAuth(): Promise<void> {
+  const ahora = new Date();
+  try {
+    await prisma.sesionRevocada.deleteMany({ where: { expiraEn: { lt: ahora } } });
+    await prisma.rateLimit.deleteMany({ where: { reset: { lt: ahora } } });
+  } catch (e) {
+    console.warn('[authStore] no se pudo podar el estado de auth:', e);
   }
 }

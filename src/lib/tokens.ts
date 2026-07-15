@@ -12,13 +12,19 @@ import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
  * valor por defecto para no bloquear el arranque.
  */
 
+const SECRETO_MIN = 32;
+
 function secreto(): string {
   const s = process.env.INVITACION_SECRET;
-  if (s && s.length > 0) return s;
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('INVITACION_SECRET es obligatorio en producción.');
+    if (!s || s.length < SECRETO_MIN) {
+      throw new Error(
+        `INVITACION_SECRET es obligatorio y debe tener al menos ${SECRETO_MIN} caracteres en producción.`,
+      );
+    }
+    return s;
   }
-  return 'secreto-desarrollo-inseguro';
+  return s && s.length > 0 ? s : 'secreto-desarrollo-inseguro';
 }
 
 /** Genera un token aleatorio para enviar al jugador (no se guarda tal cual). */

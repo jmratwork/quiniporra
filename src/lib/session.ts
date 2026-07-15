@@ -14,13 +14,20 @@ import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 export const COOKIE_SESION = 'quiniporra_admin';
 export const TTL_SESION_MS = 8 * 60 * 60 * 1000; // 8 horas
 
+// Longitud mínima en producción (alineada con randomBytes(32) del .env.example).
+const SECRETO_MIN = 32;
+
 function secreto(): string {
   const s = process.env.SESSION_SECRET;
-  if (s && s.length > 0) return s;
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('SESSION_SECRET es obligatorio en producción.');
+    if (!s || s.length < SECRETO_MIN) {
+      throw new Error(
+        `SESSION_SECRET es obligatorio y debe tener al menos ${SECRETO_MIN} caracteres en producción.`,
+      );
+    }
+    return s;
   }
-  return 'sesion-desarrollo-insegura';
+  return s && s.length > 0 ? s : 'sesion-desarrollo-insegura';
 }
 
 function firma(payload: string): string {
