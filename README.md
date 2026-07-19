@@ -513,7 +513,16 @@ otro sitio). Ante un fallo de BD, cada comprobación decide su modo: el
 **rate-limit del login es *fail-closed*** (rechaza con **503** reintentable,
 para no permitir fuerza bruta distribuida entre instancias); el anti-replay del
 TOTP y la revocación de sesiones son *fail-open* (bajo impacto: solo dejarían
-reenviar el mismo código, o una revocación caduca sola en ≤8 h).
+reenviar el mismo código, o una revocación caduca sola en ≤8 h). El rate-limit
+compartido en Postgres cubre **también los endpoints públicos** (apuestas y
+consulta de invitación), no solo el login.
+
+**Cabeceras de seguridad y CSP.** Todas las respuestas llevan una
+**Content-Security-Policy con *nonce* por petición** ([`src/middleware.ts`](src/middleware.ts)):
+`script-src` usa `'nonce-…' 'strict-dynamic'` en lugar de `'unsafe-inline'`, así
+que un `<script>` inyectado no llega a ejecutarse. El resto de cabeceras
+(`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`,
+`Permissions-Policy` y HSTS en producción) se aplican desde `next.config.mjs`.
 
 **Enrolamiento (una vez):**
 
@@ -600,6 +609,7 @@ quiniporra/
 ├── scripts/
 │   └── fetch-jornada.ts           # npm run fetch:jornada
 ├── src/
+│   ├── middleware.ts             # CSP con nonce por petición
 │   ├── app/
 │   │   ├── page.tsx               # home pública
 │   │   ├── admin/page.tsx         # panel de administración (PIN)
