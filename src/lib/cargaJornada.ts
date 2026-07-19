@@ -10,12 +10,14 @@ import { archivarQuiniela } from './historico';
  * destructiva**: nunca borra una porra en curso.
  *
  * Regla de decisión (ver `decidirAccionCarga`):
- *  - No hay ninguna quiniela           -> crear.
- *  - Ya existe la MISMA jornada         -> sin cambios (idempotente).
- *  - Existe otra jornada YA TERMINADA   -> reemplazar (CERRADA/CADUCADA o
- *    pasada su fechaCierre; la anterior ya no admite apuestas).
- *  - Existe otra jornada ABIERTA en curso -> omitir (no se destruye una porra
- *    con apuestas a medias; se reintentará en el siguiente disparo).
+ *  - No hay ninguna quiniela             -> crear.
+ *  - Ya existe la MISMA jornada           -> sin cambios (idempotente).
+ *  - Existe otra jornada que SIGUE ABIERTA EN PLAZO (fechaCierre en el futuro)
+ *    -> omitir (no se destruye una porra con apuestas a medias).
+ *  - Cualquier otra jornada distinta      -> reemplazar. La fuente solo publica
+ *    la jornada abierta en cada momento, así que ver otra distinta implica que
+ *    la anterior ya terminó (CERRADA/CADUCADA, pasada su cierre, o de cierre
+ *    desconocido). Se archiva antes de borrar, así que nada se pierde.
  */
 
 export type AccionCarga = 'crear' | 'sin-cambios' | 'reemplazar' | 'omitir-activa';
@@ -34,12 +36,17 @@ export function decidirAccionCarga(
   if (!existente) return 'crear';
   if (existente.jornada === jornadaNueva) return 'sin-cambios';
 
-  const terminada =
-    existente.estado === 'CERRADA' ||
-    existente.estado === 'CADUCADA' ||
-    (existente.fechaCierre !== null && ahora > existente.fechaCierre.getTime());
+  // Solo se respeta la jornada existente si sigue DEMOSTRABLEMENTE abierta a
+  // apuestas: estado ABIERTA y con una fecha de cierre que aún no ha llegado.
+  // Si el cierre es desconocido (null) no se puede afirmar que siga en plazo, y
+  // como la fuente solo publica la jornada abierta, ver otra distinta implica
+  // que esta ya pasó: se reemplaza (archivando antes) para no quedar atascada.
+  const sigueAbiertaEnPlazo =
+    existente.estado === 'ABIERTA' &&
+    existente.fechaCierre !== null &&
+    ahora <= existente.fechaCierre.getTime();
 
-  return terminada ? 'reemplazar' : 'omitir-activa';
+  return sigueAbiertaEnPlazo ? 'omitir-activa' : 'reemplazar';
 }
 
 export interface ResultadoCarga {
@@ -61,6 +68,13 @@ export async function cargarJornadaAutomatica(): Promise<ResultadoCarga> {
   });
 
   const accion = decidirAccionCarga(existente, jornada.jornada);
+
+  // Registro seguro de la decisión (solo nombres/estado/acción, sin datos).
+  console.info(
+    `[cargaJornada] fuente="${jornada.jornada}" cierre=${jornada.fechaCierre ?? 'null'} | ` +
+      `existente=${existente ? `"${existente.jornada}" ${existente.estado} cierre=${existente.fechaCierre?.toISOString() ?? 'null'}` : 'ninguna'} | ` +
+      `accion=${accion}`,
+  );
 
   if (accion === 'sin-cambios' || accion === 'omitir-activa') {
     return { accion, jornada: jornada.jornada };

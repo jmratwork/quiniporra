@@ -42,8 +42,10 @@ describe('decidirAccionCarga (no destructiva)', () => {
     expect(decidirAccionCarga(q, 'Jornada 5', CIERRE - 1000)).toBe('omitir-activa');
   });
 
-  it('omite si es ABIERTA en curso y sin fecha de cierre', () => {
+  it('reemplaza si es ABIERTA de cierre desconocido (null): no se puede afirmar que siga en plazo', () => {
+    // La fuente solo publica la jornada abierta; ver otra distinta implica que
+    // la anterior ya pasó. Se archiva antes de borrar, así que nada se pierde.
     const q = { jornada: 'Jornada 4', estado: 'ABIERTA' as Estado, fechaCierre: null };
-    expect(decidirAccionCarga(q, 'Jornada 5')).toBe('omitir-activa');
+    expect(decidirAccionCarga(q, 'Jornada 5')).toBe('reemplazar');
   });
 });
