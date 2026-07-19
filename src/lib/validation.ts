@@ -101,24 +101,6 @@ export function validaSignosContraMultiplicidad(
 // Esquemas de las peticiones de la API
 // ---------------------------------------------------------------------------
 
-/** Un partido introducido a mano en el formulario de fallback. */
-export const partidoManualSchema = z.object({
-  numero: z.number().int().min(1).max(15),
-  local: z.string().trim().min(1, 'Falta el equipo local').max(80),
-  visitante: z.string().trim().min(1, 'Falta el equipo visitante').max(80),
-});
-
-/** Cuerpo de POST /api/quiniela/manual */
-export const quinielaManualSchema = z.object({
-  jornada: z.string().trim().min(1, 'Falta el nombre de la jornada').max(120),
-  fechaCierre: z.string().datetime().optional().nullable(),
-  partidos: z
-    .array(partidoManualSchema)
-    .length(15, 'Debe haber exactamente 15 partidos'),
-});
-
-export type QuinielaManualInput = z.infer<typeof quinielaManualSchema>;
-
 /** Cuerpo de POST /api/invitaciones */
 export const invitacionInputSchema = z.object({
   numeroPartido: z.number().int().min(1).max(15),
@@ -135,19 +117,3 @@ export const apuestaInputSchema = z.object({
 });
 
 export type ApuestaInput = z.infer<typeof apuestaInputSchema>;
-
-/**
- * Valida que un conjunto de 15 partidos manuales es coherente:
- * números 1..15 sin huecos ni duplicados.
- */
-export function validaNumeracionPartidos(
-  partidos: { numero: number }[],
-): string | null {
-  const numeros = partidos.map((p) => p.numero).sort((a, b) => a - b);
-  for (let i = 0; i < 15; i++) {
-    if (numeros[i] !== i + 1) {
-      return 'Los partidos deben numerarse del 1 al 15 sin huecos ni repetidos.';
-    }
-  }
-  return null;
-}

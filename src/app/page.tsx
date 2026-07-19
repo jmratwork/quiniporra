@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getQuinielaActiva, vistaPublica } from '@/lib/quiniela';
+import { getQuinielaActiva, caducarSiProcede, vistaPublica } from '@/lib/quiniela';
 import { FilaPartido } from '@/components/FilaPartido';
 import { BotonImprimir } from '@/components/BotonImprimir';
 
@@ -14,6 +14,7 @@ export default async function HomePage() {
 
   try {
     const q = await getQuinielaActiva();
+    if (q) await caducarSiProcede(q); // cierre por tiempo perezoso (igual que la API)
     vista = q ? vistaPublica(q) : null;
   } catch {
     errorBd = true;

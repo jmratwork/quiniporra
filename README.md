@@ -343,8 +343,8 @@ reglas de fecha (ISO en hora de España; nulos/inválidos → `null`).
 
 **Sin genéricos, con error reintentable.** La carga automática exige un **número
 de jornada real** (nunca crea una "Jornada actual" genérica); si no lo consigue,
-lanza un error explícito y **reintentable** (el cron reintenta; queda el
-formulario manual). La fecha de cierre es deseable pero **no bloqueante** (si
+lanza un error explícito y **reintentable** (el cron lo reintenta en el siguiente
+disparo). La fecha de cierre es deseable pero **no bloqueante** (si
 falta, se avisa y la caducidad por tiempo simplemente no se aplica). Cada
 respuesta externa registra de forma **segura** su estado, tipo JSON y **claves
 reales** (nunca valores ni cuerpos) para diagnóstico.
@@ -387,8 +387,7 @@ sirve para jornadas ya celebradas.
 
 La orquestación vive en
 [`src/lib/jornadaFetcher.ts`](src/lib/jornadaFetcher.ts) e incluye un **caché en
-memoria de 10 minutos** para no repetir la petición si se pulsa "Iniciar" varias
-veces.
+memoria de 10 minutos** para no repetir la petición externa en llamadas seguidas.
 
 ### Carga programada de la jornada
 
@@ -415,8 +414,8 @@ jornada que tenga apuestas, se guarda un *snapshot* en la tabla
 `historicos_quiniela` (compatible con el generador de PDF). Así, aunque el cron
 reemplace una jornada `CERRADA` antes de que nadie descargue su boleto, queda
 consultable desde el panel de admin (**Boletos anteriores**) y se puede
-regenerar su PDF en `/api/admin/historico/[id]/pdf`. Aplica también a los
-reemplazos manuales (`iniciar`/`manual`).
+regenerar su PDF en `/api/admin/historico/[id]/pdf`. Aplica también al botón
+**Reiniciar** del panel (`DELETE /api/quiniela`), que archiva antes de borrar.
 
 El endpoint está protegido con `CRON_SECRET` (Vercel envía
 `Authorization: Bearer <CRON_SECRET>`). **Zona horaria:** Vercel programa los
@@ -439,8 +438,9 @@ desfase es inocuo. Ajusta `vercel.json` si quieres exactitud todo el año.
   recibe 403. Desde IPs de datacenter (p. ej. Vercel) puede variar. Como la
   cabecera de SELAE es **best-effort**, si falla se sigue adelante con los
   partidos de Mundo Deportivo.
-- Para emergencias siguen existiendo (protegidas por sesión, sin exponer en la
-  UI) los endpoints `POST /api/quiniela/iniciar` y `POST /api/quiniela/manual`.
+- La carga es **solo automática** (cron): no hay carga ni formulario manual en el
+  panel. Si ambas fuentes fallasen a la vez, la jornada no se carga hasta el
+  siguiente disparo del cron con la fuente ya restablecida.
 
 ### Ejemplo real de `npm run fetch:jornada`
 
@@ -477,9 +477,7 @@ desfase es inocuo. Ajusta `vercel.json` si quieres exactitud todo el año.
 | `POST`   | `/api/admin/logout`         | Cierra la sesión (borra la cookie).                                         | —         |
 | `GET`    | `/api/admin/session`        | `{ autenticado, totpRequerido }` para la pantalla de login.                | —         |
 | `GET`    | `/api/quiniela`             | Estado completo. Sin sesión → vista pública; con sesión → vista admin.     | parcial   |
-| `DELETE` | `/api/quiniela`             | Reinicia todo (borra la Quiniela activa en cascada).                        | sesión    |
-| `POST`   | `/api/quiniela/iniciar`     | "Iniciar": busca la jornada en SELAE y crea la Quiniela. **502** si falla.  | sesión    |
-| `POST`   | `/api/quiniela/manual`      | Fallback: crear la jornada con los 15 partidos a mano.                      | sesión    |
+| `DELETE` | `/api/quiniela`             | Reinicia todo: archiva y borra la Quiniela activa (en cascada).             | sesión    |
 | `POST`   | `/api/invitaciones`         | Crea invitación (partido, nombre, multiplicidad). Devuelve el token 1 vez.  | sesión    |
 | `DELETE` | `/api/admin/invitaciones/[id]` | Anula una invitación PENDIENTE (409 si ya fue usada).                    | sesión    |
 | `GET`    | `/api/invitaciones/[token]` | Datos para la pantalla del jugador. **409** si ya apostado o fuera de plazo. | token     |
@@ -532,22 +530,9 @@ curl -c cookies.txt -X POST http://localhost:3000/api/admin/login \
   -H "Content-Type: application/json" \
   -d '{"pin":"TU_PIN","code":"123456"}'
 
-# 2) A partir de aquí, usa la cookie (-b cookies.txt) en las rutas de admin:
-
-# Iniciar la jornada (carga automática)
-curl -b cookies.txt -X POST http://localhost:3000/api/quiniela/iniciar \
-  -H "Content-Type: application/json" -d '{"confirmar": true}'
-
-# Fallback manual: crear la jornada con 15 partidos
-curl -b cookies.txt -X POST http://localhost:3000/api/quiniela/manual \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jornada": "Jornada 34 - 2025/2026",
-    "partidos": [
-      {"numero":1,"local":"Real Madrid","visitante":"Barcelona"},
-      { "...": "hasta 15, siendo el 15 el Pleno al 15" }
-    ]
-  }'
+# 2) A partir de aquí, usa la cookie (-b cookies.txt) en las rutas de admin.
+#    La jornada la carga sola el cron; para forzarla en local, invoca el cron:
+curl http://localhost:3000/api/cron/jornada
 
 # Crear una invitación para el partido 3 (doble)
 curl -b cookies.txt -X POST http://localhost:3000/api/invitaciones \
@@ -616,10 +601,10 @@ quiniporra/
 │   │   ├── admin/page.tsx         # panel de administración (PIN)
 │   │   ├── apostar/[token]/page.tsx
 │   │   └── api/…                  # route handlers
-│   ├── components/                # FilaPartido, CasillasSignos, FormularioManual, Toast…
+│   ├── components/                # FilaPartido, CasillasSignos, Escudo, Select, Toast…
 │   └── lib/
-│       ├── jornadaFetcher.ts      # orquesta cabecera (SELAE) + partidos
-│       ├── mundoDeportivo.ts      # scraper del boleto vigente (15 partidos)
+│       ├── jornadaFetcher.ts      # orquesta Mundo Deportivo (primario) + SELAE (respaldo)
+│       ├── mundoDeportivo.ts      # scraper del boleto vigente (15 partidos + cabecera)
 │       └── …                      # prisma, auth, validation, tokens, cache, quiniela, pdf, http, errors
 ├── .env.example
 └── package.json

@@ -7,6 +7,7 @@ import {
   vistaPublica,
 } from '@/lib/quiniela';
 import { tieneSesionAdmin, requiereSesionAdmin } from '@/lib/auth';
+import { archivarQuiniela } from '@/lib/historico';
 import { ok, manejaError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
@@ -39,6 +40,9 @@ export async function GET(req: NextRequest) {
  * DELETE /api/quiniela
  * Reinicia todo: borra la Quiniela activa (y en cascada partidos,
  * invitaciones y apuestas). Requiere sesión de administración.
+ *
+ * Antes de borrar se archiva el boleto (si tenía apuestas), igual que hacen la
+ * carga automática y los formularios de carga (M4), para no perder el histórico.
  */
 export async function DELETE(req: NextRequest) {
   try {
@@ -48,7 +52,10 @@ export async function DELETE(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
     });
     if (activa) {
-      await prisma.quiniela.delete({ where: { id: activa.id } });
+      await prisma.$transaction(async (tx) => {
+        await archivarQuiniela(tx, activa.id);
+        await tx.quiniela.delete({ where: { id: activa.id } });
+      });
     }
     return ok({ ok: true });
   } catch (e) {

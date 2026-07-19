@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   marcasExigidas,
   validaSignosContraMultiplicidad,
-  validaNumeracionPartidos,
   signosSchema,
   type Signos,
 } from '../src/lib/validation';
@@ -80,18 +79,5 @@ describe('signosSchema (Zod)', () => {
     expect(
       signosSchema.safeParse({ tipo: 'PLENO', local: ['9'], visitante: ['M'] }).success,
     ).toBe(false);
-  });
-});
-
-describe('validaNumeracionPartidos', () => {
-  const partidos = (nums: number[]) => nums.map((numero) => ({ numero }));
-
-  it('acepta 1..15 sin huecos', () => {
-    expect(validaNumeracionPartidos(partidos([...Array(15)].map((_, i) => i + 1)))).toBeNull();
-  });
-
-  it('rechaza huecos o duplicados', () => {
-    const conHueco = partidos([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 14]);
-    expect(validaNumeracionPartidos(conHueco)).toMatch(/1 al 15/i);
   });
 });
