@@ -1,27 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import type { construirSnapshot as ConstruirSnapshot } from '../src/lib/historico';
 
-let construirSnapshot: (
-  jornada: string,
-  fechaCierre: Date | null,
-  partidos: {
-    numero: number;
-    local: string;
-    visitante: string;
-    esPleno: boolean;
-    apuesta: { signos: unknown; nombreJugador: string } | null;
-  }[],
-) => {
-  jornada: string;
-  fechaCierre: string | null;
-  partidos: {
-    numero: number;
-    local: string;
-    visitante: string;
-    esPleno: boolean;
-    signos: unknown;
-    nombreJugador: string | null;
-  }[];
-};
+let construirSnapshot: typeof ConstruirSnapshot;
 
 beforeAll(async () => {
   process.env.DATABASE_URL ??= 'postgresql://u:p@localhost:5432/test';
