@@ -7,7 +7,8 @@ import {
   validaSignosContraMultiplicidad,
 } from '@/lib/validation';
 import { TOTAL_PARTIDOS } from '@/lib/quiniela';
-import { rateLimit, ipDe } from '@/lib/rateLimit';
+import { ipDe } from '@/lib/rateLimit';
+import { rateLimitPersistente } from '@/lib/authStore';
 import { ok, error, manejaError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
@@ -30,8 +31,9 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   try {
-    // Rate limit por IP para el endpoint público.
-    const rl = rateLimit(`apuestas:${ipDe(req)}`, 30, 60_000);
+    // Rate limit por IP para el endpoint público, compartido entre instancias
+    // (Postgres); ante fallo de BD cae a memoria (fail-safe), no bloquea apuestas.
+    const rl = await rateLimitPersistente(`apuestas:${ipDe(req)}`, 30, 60_000);
     if (!rl.permitido) {
       return error('Demasiadas peticiones. Espera unos segundos.', 429);
     }

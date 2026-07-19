@@ -101,7 +101,9 @@ export async function pasoTotpYaUsado(paso: number): Promise<boolean> {
     });
     return res.count === 0; // 0 => no avanzó => paso ya usado (replay)
   } catch (e) {
-    console.warn('[authStore] anti-replay no disponible (fail-open):', e);
+    // Fail-open visible: se registra como error (no warn) para que un fallo de
+    // BD que desactive el anti-replay quede detectable en logs/alertas.
+    console.error('[SEGURIDAD] anti-replay TOTP no disponible (fail-open):', e);
     return false;
   }
 }
@@ -115,7 +117,9 @@ export async function sesionRevocada(jti: string): Promise<boolean> {
     const row = await prisma.sesionRevocada.findUnique({ where: { jti } });
     return row !== null;
   } catch (e) {
-    console.warn('[authStore] revocación no disponible (fail-open):', e);
+    // Fail-open visible: si la BD no responde, una sesión revocada se acepta;
+    // se registra como error para que sea detectable (caduca sola en ≤8 h).
+    console.error('[SEGURIDAD] comprobación de revocación no disponible (fail-open):', e);
     return false;
   }
 }

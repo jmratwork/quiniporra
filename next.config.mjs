@@ -2,26 +2,10 @@
 
 const esProduccion = process.env.NODE_ENV === 'production';
 
-// Content-Security-Policy. En desarrollo, Next necesita 'unsafe-eval' y
-// WebSocket (HMR); en producción no. Se usa 'unsafe-inline' para scripts porque
-// Next inyecta scripts de hidratación inline sin nonce en el App Router; una CSP
-// más estricta requeriría nonces vía middleware. Aun así, esta política ya
-// restringe orígenes, frame-ancestors (anti-clickjacking), object-src y base-uri.
-const csp = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-  "frame-ancestors 'none'",
-  "form-action 'self'",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  `script-src 'self' 'unsafe-inline'${esProduccion ? '' : " 'unsafe-eval'"}`,
-  `connect-src 'self'${esProduccion ? '' : ' ws:'}`,
-].join('; ');
-
+// La Content-Security-Policy se emite desde `middleware.ts` porque usa un NONCE
+// por petición (evita 'unsafe-inline' en script-src). Aquí quedan las cabeceras
+// de seguridad estáticas, que se aplican a todas las rutas (incluidos assets).
 const securityHeaders = [
-  { key: 'Content-Security-Policy', value: csp },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },

@@ -2,7 +2,8 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { hashToken } from '@/lib/tokens';
 import { marcasExigidas } from '@/lib/validation';
-import { rateLimit, ipDe } from '@/lib/rateLimit';
+import { ipDe } from '@/lib/rateLimit';
+import { rateLimitPersistente } from '@/lib/authStore';
 import { ok, error, manejaError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +23,7 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> },
 ) {
   try {
-    const rl = rateLimit(`inv:${ipDe(req)}`, 60, 60_000);
+    const rl = await rateLimitPersistente(`inv:${ipDe(req)}`, 60, 60_000);
     if (!rl.permitido) {
       return error('Demasiadas peticiones. Espera unos segundos.', 429);
     }
