@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requiereSesionAdmin } from '@/lib/auth';
-import { generarPdfBoleto, type BoletoPdf } from '@/lib/pdf';
+import { generarPdfBoleto, boletoPdfSchema } from '@/lib/pdf';
 import { error, manejaError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
@@ -24,7 +24,14 @@ export async function GET(
       return error('Boleto archivado no encontrado.', 404);
     }
 
-    const pdf = await generarPdfBoleto(hist.snapshot as unknown as BoletoPdf);
+    // No confiamos a ciegas en el JSON almacenado: validamos su forma antes de
+    // pasarlo a pdf-lib (defensa ante corrupción o deriva del esquema).
+    const parsed = boletoPdfSchema.safeParse(hist.snapshot);
+    if (!parsed.success) {
+      return error('El boleto archivado tiene un formato no válido.', 500);
+    }
+
+    const pdf = await generarPdfBoleto(parsed.data);
     return new Response(pdf as BodyInit, {
       status: 200,
       headers: {

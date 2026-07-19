@@ -3,9 +3,15 @@ import { ZodError } from 'zod';
 import { AdminAuthError } from './auth';
 import { JornadaFetchError } from './errors';
 
+// Las respuestas de la API son dinámicas y a menudo con datos de sesión (vista
+// admin, invitaciones, estado del jugador). Se marcan no-store en el propio
+// servidor para que ninguna caché intermedia/CDN las guarde (el `cache:
+// 'no-store'` del fetch cliente solo cubre la caché del navegador).
+const SIN_CACHE = { 'Cache-Control': 'no-store' } as const;
+
 /** Respuesta JSON de éxito. */
 export function ok<T>(data: T, status = 200): NextResponse {
-  return NextResponse.json(data, { status });
+  return NextResponse.json(data, { status, headers: SIN_CACHE });
 }
 
 /** Respuesta JSON de error con forma { error, detalle? }. */
@@ -16,7 +22,7 @@ export function error(
 ): NextResponse {
   return NextResponse.json(
     detalle ? { error: mensaje, detalle } : { error: mensaje },
-    { status },
+    { status, headers: SIN_CACHE },
   );
 }
 

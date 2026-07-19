@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requiereSesionAdmin } from '@/lib/auth';
 import { invitacionInputSchema } from '@/lib/validation';
+import { limpiaNombreEquipo } from '@/lib/mundoDeportivo';
 import { generaToken, hashToken } from '@/lib/tokens';
 import { ok, error, manejaError } from '@/lib/http';
 
@@ -23,6 +24,13 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
 
     const datos = invitacionInputSchema.parse(body);
+
+    // Mismo saneado que los nombres de equipo: quita control/bidi/invisibles y
+    // ángulos antes de que el nombre llegue a la BD, la UI y el PDF.
+    const nombreJugador = limpiaNombreEquipo(datos.nombreJugador, 80);
+    if (!nombreJugador) {
+      return error('El nombre del jugador no es válido.', 400);
+    }
 
     const q = await prisma.quiniela.findFirst({
       orderBy: { createdAt: 'desc' },
@@ -53,7 +61,7 @@ export async function POST(req: NextRequest) {
       prisma.invitacion.create({
         data: {
           partidoId: partido.id,
-          nombreJugador: datos.nombreJugador,
+          nombreJugador,
           multiplicidad: datos.multiplicidad,
           tokenHash,
           estado: 'PENDIENTE',
@@ -72,7 +80,7 @@ export async function POST(req: NextRequest) {
         enlace: `${base}/apostar/${token}`,
         partido: { numero: partido.numero, local: partido.local, visitante: partido.visitante },
         multiplicidad: datos.multiplicidad,
-        nombreJugador: datos.nombreJugador,
+        nombreJugador,
       },
       201,
     );

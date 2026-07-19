@@ -21,6 +21,11 @@ import { AdminAuthError } from './auth';
 // Ventana de ±1 paso (30 s) para tolerar desfase de reloj del móvil.
 authenticator.options = { window: 1, step: 30 };
 
+// Longitud mínima del secreto base32 en producción: 26 chars ≈ 128 bits de
+// entropía. `npm run totp:setup` genera uno válido; esto evita que un operador
+// ponga a mano un valor corto/débil en las variables de entorno.
+const TOTP_SECRET_MIN = 26;
+
 export function totpConfigurado(): boolean {
   return !!process.env.TOTP_SECRET;
 }
@@ -55,6 +60,15 @@ export function comprobarTotp(code: string): ResultadoTotp {
       '[totp] TOTP_SECRET no configurado: se omite el segundo factor (solo en desarrollo).',
     );
     return { valido: true, paso: null };
+  }
+
+  // En producción, un secreto demasiado corto no ofrece la entropía esperada:
+  // fail-closed (500) en vez de aceptar un segundo factor debilitado.
+  if (process.env.NODE_ENV === 'production' && secreto.length < TOTP_SECRET_MIN) {
+    throw new AdminAuthError(
+      500,
+      `TOTP_SECRET es demasiado corto (mín. ${TOTP_SECRET_MIN} caracteres base32).`,
+    );
   }
 
   const limpio = (code ?? '').replace(/\s+/g, '');

@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage } from 'pdf-lib';
+import { z } from 'zod';
 import type { Signos } from './validation';
-import { SIGNOS_1X2, VALORES_PLENO } from './validation';
+import { SIGNOS_1X2, VALORES_PLENO, signosSchema } from './validation';
 
 /**
  * Genera el PDF del boleto de La Quiniela con pdf-lib.
@@ -29,6 +30,29 @@ export interface BoletoPdf {
   fechaCierre: Date | string | null;
   partidos: PartidoPdf[];
 }
+
+/**
+ * Valida la forma de un boleto antes de generar el PDF. Se usa para no confiar
+ * a ciegas en el JSON `snapshot` guardado en el histórico (aunque hoy siempre lo
+ * escribe la propia app): si el esquema cambia o el dato se corrompe, se falla
+ * de forma controlada en vez de pasar basura a pdf-lib.
+ */
+export const boletoPdfSchema = z.object({
+  jornada: z.string(),
+  fechaCierre: z.string().nullable(),
+  partidos: z
+    .array(
+      z.object({
+        numero: z.number().int().min(1).max(15),
+        local: z.string(),
+        visitante: z.string(),
+        esPleno: z.boolean(),
+        signos: signosSchema.nullable(),
+        nombreJugador: z.string().nullable(),
+      }),
+    )
+    .length(15),
+});
 
 // cesped-600 (#16a34a): el mismo verde de marca que la interfaz.
 const VERDE = rgb(0.086, 0.639, 0.29);
