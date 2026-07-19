@@ -23,8 +23,18 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     // Límite: 10 peticiones cada 10 minutos por IP (el flujo usa 2 por login).
-    const rl = await rateLimitPersistente(`login:${ipDe(req)}`, 10, 10 * 60 * 1000);
+    // fail-closed: si la BD no responde, se rechaza (evita fuerza bruta
+    // distribuida entre instancias) con un 503 reintentable, no un 429.
+    const rl = await rateLimitPersistente(`login:${ipDe(req)}`, 10, 10 * 60 * 1000, {
+      failClosed: true,
+    });
     if (!rl.permitido) {
+      if (rl.errorBd) {
+        return error(
+          'El servicio de autenticación no está disponible temporalmente. Reinténtalo en unos minutos.',
+          503,
+        );
+      }
       const min = Math.ceil(rl.resetEnMs / 60000);
       return error(`Demasiados intentos. Vuelve a probar en ${min} minuto(s).`, 429);
     }

@@ -509,8 +509,11 @@ anti-replay del TOTP y la **revocación de sesiones** se guardan en Postgres
 (tablas `rate_limits`, `totp_step`, `sesiones_revocadas`), no en memoria, para
 que funcionen aunque Vercel reparta las peticiones entre varias instancias. El
 `logout` **revoca** el `jti` (la sesión deja de valer aunque el token esté en
-otro sitio). Estas comprobaciones son *fail-open* ante un fallo de BD: no
-bloquean el login (la seguridad de fondo sigue en PIN + TOTP + cookie firmada).
+otro sitio). Ante un fallo de BD, cada comprobación decide su modo: el
+**rate-limit del login es *fail-closed*** (rechaza con **503** reintentable,
+para no permitir fuerza bruta distribuida entre instancias); el anti-replay del
+TOTP y la revocación de sesiones son *fail-open* (bajo impacto: solo dejarían
+reenviar el mismo código, o una revocación caduca sola en ≤8 h).
 
 **Enrolamiento (una vez):**
 

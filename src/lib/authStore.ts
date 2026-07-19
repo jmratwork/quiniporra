@@ -23,12 +23,25 @@ import { rateLimit as rateLimitMemoria } from './rateLimit';
 export interface ResultadoRate {
   permitido: boolean;
   resetEnMs: number;
+  /** true si la decisión se tomó sin BD por un fallo de la misma. */
+  errorBd?: boolean;
+}
+
+export interface OpcionesRate {
+  /**
+   * Ante un fallo de BD: por defecto (false) se cae al limitador EN MEMORIA
+   * (fail-safe). Con `failClosed: true` se RECHAZA la petición (fail-closed),
+   * para superficies sensibles como el login, donde el fallback por-instancia
+   * permitiría fuerza bruta distribuida entre instancias serverless.
+   */
+  failClosed?: boolean;
 }
 
 export async function rateLimitPersistente(
   clave: string,
   max: number,
   ventanaMs: number,
+  opts: OpcionesRate = {},
 ): Promise<ResultadoRate> {
   const ahora = Date.now();
   const reset = new Date(ahora + ventanaMs);
@@ -52,7 +65,13 @@ export async function rateLimitPersistente(
     const resetEnMs = Math.max(0, fila.reset.getTime() - ahora);
     return { permitido: contador <= max, resetEnMs };
   } catch (e) {
-    // Fail-SAFE: si la BD no responde, no dejamos el login sin límite; usamos el
+    if (opts.failClosed) {
+      // Fail-CLOSED: en superficies sensibles (login) preferimos rechazar antes
+      // que permitir fuerza bruta distribuida con el límite por-instancia.
+      console.warn('[authStore] rate limit BD no disponible; fail-closed:', e);
+      return { permitido: false, resetEnMs: ventanaMs, errorBd: true };
+    }
+    // Fail-SAFE: si la BD no responde, no dejamos sin límite; usamos el
     // limitador en memoria (protección por instancia) como segunda capa.
     console.warn('[authStore] rate limit BD no disponible; fallback en memoria:', e);
     const r = rateLimitMemoria(clave, max, ventanaMs);
