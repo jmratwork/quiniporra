@@ -303,39 +303,51 @@ Todo se hace **en el servidor** (route handler / script), nunca desde el
 navegador (evita CORS y no expone nada), enviando cabeceras de navegador
 (`User-Agent`, `Accept`, `Referer`).
 
-### 1. Cabecera de la jornada → SELAE
-
-**`GET https://www.loteriasyapuestas.es/servicios/proximosv3?game_id=LAQU&num=1`**
-
-Endpoint JSON **no documentado** que usa la propia Web de SELAE. Devuelve la
-**cabecera** de la próxima jornada abierta: número de jornada, año, fecha de
-cierre, fecha de sorteo e `id_sorteo`. **No incluye los emparejamientos.**
-
-El parser de la cabecera (`parseaCabecera` en
-[`src/lib/jornadaFetcher.ts`](src/lib/jornadaFetcher.ts)) es **robusto**: admite
-la respuesta como array, objeto único u **objeto anidado** bajo claves
-envolventes, y varias **variantes de nombre** (`jornada`/`numero_jornada`,
-`cierre`/`fecha_cierre`, `anyo`/`anio`, `id_sorteo`/`idsorteo`…). Las fechas se
-convierten a **ISO 8601** interpretando las cadenas sin zona horaria como **hora
-de España** (`Europe/Madrid`, CET/CEST según DST — importante porque el servidor
-de Vercel corre en UTC); las fechas nulas o inválidas dan `null`. Si **no** se
-puede determinar el número de jornada y la fecha de cierre, la carga automática
-**no crea una jornada genérica**: devuelve un error explícito y **reintentable**
-(el cron reintenta; el admin puede usar el formulario manual). Cada respuesta
-registra de forma **segura** su estado, tipo JSON y **claves reales** (nunca
-valores ni cuerpos) para diagnóstico.
-
-### 2. Los 15 partidos → Mundo Deportivo
+### 1. Todo el boleto → Mundo Deportivo (fuente primaria)
 
 **`GET https://www.mundodeportivo.com/servicios/quiniela`**
 
-> **Por qué no SELAE.** Se comprobó con peticiones reales que los endpoints de
-> SELAE **no publican los emparejamientos de la jornada abierta**:
-> `proximosv3` solo trae la cabecera, y `buscadorSorteos` únicamente devuelve
-> jornadas **ya celebradas**. Mundo Deportivo sí publica el **boleto vigente**,
-> así que de ahí salen los 15 partidos.
+Mundo Deportivo publica el **boleto vigente** y de él se obtiene **todo lo
+necesario**: los **15 partidos**, el **número de jornada** ("Jornada 73"), el
+**año** y la **fecha de cierre** ("Horario de cierre: Viernes 17 (18:00)"). Es la
+fuente primaria porque **es accesible desde Vercel**, a diferencia de SELAE (ver
+abajo).
 
-La página **no es una API legible por máquina**, así que el parser
+> **Por qué no SELAE como principal.** Comprobado con peticiones reales: SELAE
+> **bloquea con Akamai (HTTP 403) las peticiones desde IPs de datacenter** como
+> las de Vercel, y además `proximosv3` solo trae la cabecera y `buscadorSorteos`
+> solo jornadas ya celebradas. Por eso el boleto entero (partidos + cabecera) se
+> lee de Mundo Deportivo.
+
+La fecha de cierre se infiere del texto "día de la semana + día + hora"
+(p. ej. "Viernes 17 (18:00)") buscando la fecha concreta más cercana en el futuro
+que cumpla ambos, en **hora de España** (`Europe/Madrid`, CET/CEST según DST —
+importante porque Vercel corre en UTC). El parser
+([`src/lib/mundoDeportivo.ts`](src/lib/mundoDeportivo.ts)) es defensivo; si algún
+dato no se puede extraer, queda `null`.
+
+### 2. Enriquecimiento opcional → SELAE
+
+**`GET https://www.loteriasyapuestas.es/servicios/proximosv3?game_id=LAQU&num=1`**
+
+Endpoint JSON **no documentado** de la Web de SELAE. Cuando es accesible (no
+desde Vercel), aporta `id_sorteo`, fecha de sorteo y **rellena** el número de
+jornada o la fecha de cierre si Mundo Deportivo no los trajo. Su parser
+(`parseaCabecera`) es **robusto**: admite array, objeto único u **objeto
+anidado**, y variantes de nombre (`jornada`/`numero_jornada`,
+`cierre`/`fecha_cierre`, `anyo`/`anio`, `id_sorteo`/`idsorteo`…), con las mismas
+reglas de fecha (ISO en hora de España; nulos/inválidos → `null`).
+
+**Sin genéricos, con error reintentable.** La carga automática exige un **número
+de jornada real** (nunca crea una "Jornada actual" genérica); si no lo consigue,
+lanza un error explícito y **reintentable** (el cron reintenta; queda el
+formulario manual). La fecha de cierre es deseable pero **no bloqueante** (si
+falta, se avisa y la caducidad por tiempo simplemente no se aplica). Cada
+respuesta externa registra de forma **segura** su estado, tipo JSON y **claves
+reales** (nunca valores ni cuerpos) para diagnóstico.
+
+**Cómo se parsean los partidos.** La página **no es una API legible por
+máquina**, así que el parser
 ([`src/lib/mundoDeportivo.ts`](src/lib/mundoDeportivo.ts)) es deliberadamente
 defensivo. La estructura real tiene **dos bloques** y la posición del partido
 aparece de formas distintas en cada uno:

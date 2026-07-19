@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import { cacheGet, cacheSet, TTL_JORNADA_MS } from './cache';
 import { JornadaFetchError } from './errors';
-import { obtenerPartidosMundoDeportivo, limpiaNombreEquipo } from './mundoDeportivo';
+import { obtenerBoletoMundoDeportivo, limpiaNombreEquipo } from './mundoDeportivo';
 import { fetchTextoExterno } from './fetchExterno';
+import { aIso } from './fechas';
 
-// Se reexporta para no romper a quien lo importaba desde aquí.
+// Se reexportan para no romper a quien los importaba desde aquí (incl. tests).
 export { JornadaFetchError };
+export { aIso };
 
 /**
  * Obtención automática de la jornada actual de La Quiniela.
@@ -106,66 +108,6 @@ function primerCampo(obj: Record<string, unknown>, claves: string[]): unknown {
     if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
   }
   return undefined;
-}
-
-/**
- * Minutos que la hora local de Europe/Madrid va por delante de UTC en un
- * instante dado (60 en invierno CET, 120 en verano CEST).
- */
-function offsetMadridMin(utcMs: number): number {
-  const d = new Date(utcMs);
-  const enMadrid = new Date(d.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
-  const enUtc = new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }));
-  return Math.round((enMadrid.getTime() - enUtc.getTime()) / 60000);
-}
-
-/** Interpreta unos componentes naive como hora de España y devuelve ISO UTC. */
-function naiveMadridAIso(
-  Y: number,
-  Mo: number,
-  D: number,
-  h: number,
-  mi: number,
-  se: number,
-): string | null {
-  // Rechaza valores fuera de rango (fechas inválidas).
-  if (Mo < 1 || Mo > 12 || D < 1 || D > 31 || h > 23 || mi > 59 || se > 59) return null;
-  const utcGuess = Date.UTC(Y, Mo - 1, D, h, mi, se);
-  if (Number.isNaN(utcGuess)) return null;
-  const real = utcGuess - offsetMadridMin(utcGuess) * 60000;
-  const d = new Date(real);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
-
-/**
- * Convierte una fecha de SELAE a ISO 8601 (UTC), o null si es nula/inválida.
- * Contempla: fechas ya con zona horaria (Z/±hh:mm), fechas naive sin zona
- * ("YYYY-MM-DD HH:MM:SS", interpretadas como hora de España) y solo-fecha.
- */
-export function aIso(v: unknown): string | null {
-  if (typeof v !== 'string') return null;
-  const s = v.trim();
-  if (s === '') return null;
-
-  // Ya trae zona horaria explícita -> se respeta.
-  if (/([zZ]|[+-]\d{2}:?\d{2})$/.test(s)) {
-    const d = new Date(s.includes('T') ? s : s.replace(' ', 'T'));
-    return Number.isNaN(d.getTime()) ? null : d.toISOString();
-  }
-
-  // Naive con hora: "YYYY-MM-DD HH:MM[:SS]" o con "T".
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
-  if (m) {
-    return naiveMadridAIso(+m[1], +m[2], +m[3], +m[4], +m[5], m[6] ? +m[6] : 0);
-  }
-
-  // Solo fecha: "YYYY-MM-DD" -> medianoche de España.
-  const md = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (md) return naiveMadridAIso(+md[1], +md[2], +md[3], 0, 0, 0);
-
-  // Último recurso: que lo intente Date (formatos raros); null si no cuela.
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 /** Extrae "AAAAMMDD" sin desfase de zona horaria. */
@@ -506,13 +448,6 @@ async function partidosDesdeSelae(cab: CabeceraSorteo): Promise<PartidoJornada[]
 // Orquestación
 // ---------------------------------------------------------------------------
 
-function nombreJornada(cab: CabeceraSorteo | null): string {
-  if (cab?.numeroJornada != null) {
-    return `Jornada ${cab.numeroJornada}${cab.anyo ? ` - ${cab.anyo}` : ''}`;
-  }
-  return 'Jornada actual de La Quiniela';
-}
-
 /**
  * Obtiene la jornada actual (la próxima abierta a apuestas) con sus 15 partidos.
  * Lanza JornadaFetchError si ninguna fuente responde: entonces toca el
@@ -537,25 +472,42 @@ export async function obtenerJornadaActual(
     errorCabecera = e instanceof JornadaFetchError ? e.message : String(e);
   }
 
-  // 2) Partidos: Mundo Deportivo (primaria) -> SELAE (respaldo).
+  // 2) Partidos + cabecera de Mundo Deportivo (fuente PRIMARIA; accesible desde
+  //    Vercel, a diferencia de SELAE, bloqueado por Akamai). De aquí salen el
+  //    número de jornada, el año y —si es parseable— la fecha de cierre.
   const errores: string[] = [];
   let partidos: PartidoJornada[] | null = null;
   let fuente: FuentePartidos = 'MUNDO_DEPORTIVO';
   let celebrada = false;
+  let numeroJornada: number | null = null;
+  let anyo: string | null = null;
+  let fechaCierre: string | null = null;
 
   try {
-    partidos = await obtenerPartidosMundoDeportivo();
+    const md = await obtenerBoletoMundoDeportivo();
+    partidos = md.partidos;
+    numeroJornada = md.numeroJornada;
+    anyo = md.anyo;
+    fechaCierre = md.fechaCierre;
   } catch (e) {
     errores.push(
       `Mundo Deportivo: ${e instanceof JornadaFetchError ? e.message : String(e)}`,
     );
   }
 
+  // Relleno best-effort con la cabecera de SELAE (por si Mundo Deportivo falló
+  // en algún campo). SELAE suele estar bloqueado desde Vercel.
+  numeroJornada = numeroJornada ?? cab?.numeroJornada ?? null;
+  anyo = anyo ?? cab?.anyo ?? null;
+  fechaCierre = fechaCierre ?? cab?.fechaCierre ?? null;
+
+  // Respaldo de partidos: SELAE (solo jornadas ya publicadas/celebradas).
   if (!partidos && cab) {
     try {
       partidos = await partidosDesdeSelae(cab);
       fuente = 'SELAE';
       celebrada = true;
+      numeroJornada = numeroJornada ?? cab.numeroJornada;
     } catch (e) {
       errores.push(`SELAE: ${e instanceof JornadaFetchError ? e.message : String(e)}`);
     }
@@ -569,24 +521,30 @@ export async function obtenerJornadaActual(
     );
   }
 
-  // No creamos una jornada "genérica": exigimos número de jornada y fecha de
-  // cierre reales de la cabecera. Si faltan, error EXPLÍCITO y REINTENTABLE
-  // (el cron lo reintenta; el admin puede usar el formulario manual).
-  if (!cab || cab.numeroJornada === null || cab.fechaCierre === null) {
+  // Exigimos un número de jornada REAL (nada de nombres genéricos). La fecha de
+  // cierre es deseable pero NO bloqueante: SELAE está bloqueado desde Vercel y
+  // Mundo Deportivo no siempre la publica de forma parseable. Si falta, se avisa
+  // pero se sigue (la caducidad por tiempo simplemente no se aplicará).
+  if (numeroJornada === null) {
     throw new JornadaFetchError(
-      'No se pudo determinar el número de jornada y la fecha de cierre desde SELAE.',
-      `${errorCabecera ? `Cabecera: ${errorCabecera}. ` : ''}` +
-        `numeroJornada=${cab?.numeroJornada ?? 'null'}, fechaCierre=${cab?.fechaCierre ?? 'null'}. ` +
+      'No se pudo determinar el número de jornada.',
+      `${errores.join(' | ') || 'sin detalles'}. ` +
         'Reintentable en el siguiente disparo del cron; si persiste, usa el formulario manual.',
+    );
+  }
+  if (fechaCierre === null) {
+    console.warn(
+      `[jornadaFetcher] jornada ${numeroJornada} sin fecha de cierre ` +
+        '(SELAE bloqueado y Mundo Deportivo sin dato parseable)',
     );
   }
 
   const resultado: JornadaObtenida = {
-    jornada: nombreJornada(cab),
-    numeroJornada: cab.numeroJornada,
-    fechaCierre: cab.fechaCierre,
-    fechaSorteo: cab.fechaSorteo,
-    idSorteo: cab.idSorteo,
+    jornada: `Jornada ${numeroJornada}${anyo ? ` - ${anyo}` : ''}`,
+    numeroJornada,
+    fechaCierre,
+    fechaSorteo: cab?.fechaSorteo ?? null,
+    idSorteo: cab?.idSorteo ?? null,
     celebrada,
     fuente,
     partidos,

@@ -1,5 +1,6 @@
 import { JornadaFetchError } from './errors';
 import { fetchTextoExterno } from './fetchExterno';
+import { fechaCierreDesdeDiaSemana } from './fechas';
 
 /**
  * Obtención de los 15 partidos del boleto VIGENTE de La Quiniela desde la
@@ -189,8 +190,11 @@ export function posicionCercana(lineas: string[], i: number): number | null {
 
 /** Parsea el HTML del boleto y devuelve los partidos encontrados (0..15). */
 export function parseaBoleto(html: string): PartidoBoleto[] {
-  const lineas = htmlALineas(html);
+  return partidosDeLineas(htmlALineas(html));
+}
 
+/** Extrae los partidos a partir de las líneas ya limpias del HTML. */
+export function partidosDeLineas(lineas: string[]): PartidoBoleto[] {
   const partidos: PartidoBoleto[] = [];
   const posicionesVistas = new Set<number>();
   const parejasVistas = new Set<string>();
@@ -224,14 +228,95 @@ export function parseaBoleto(html: string): PartidoBoleto[] {
   return partidos;
 }
 
+// ---------------------------------------------------------------------------
+// Cabecera del boleto (jornada, año, cierre) desde Mundo Deportivo
+// ---------------------------------------------------------------------------
+
+const DIAS_SEMANA: Record<string, number> = {
+  domingo: 0,
+  lunes: 1,
+  martes: 2,
+  miercoles: 3,
+  jueves: 4,
+  viernes: 5,
+  sabado: 6,
+};
+
+function sinTildes(s: string): string {
+  return s
+    .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+export interface CabeceraBoleto {
+  numeroJornada: number | null;
+  anyo: string | null;
+  fechaCierre: string | null; // ISO 8601 o null
+}
+
 /**
- * Descarga y parsea el boleto vigente de Mundo Deportivo.
+ * Extrae de las líneas del boleto: número de jornada ("Jornada 73"), año
+ * ("2026") y fecha de cierre a partir del "Horario de cierre"
+ * ("Viernes 17 (18:00)"), infiriendo la fecha concreta (día de la semana + día
+ * del mes) en hora de España. Cualquier campo que no se pueda extraer -> null.
+ */
+export function parseaCabeceraBoleto(
+  lineas: string[],
+  ahoraMs: number = Date.now(),
+): CabeceraBoleto {
+  let numeroJornada: number | null = null;
+  let anyo: string | null = null;
+
+  for (let i = 0; i < lineas.length; i++) {
+    const m = lineas[i].match(/^jornada\s+(\d{1,3})$/i);
+    if (m) {
+      numeroJornada = parseInt(m[1], 10);
+      const sig = (lineas[i + 1] ?? '').trim();
+      if (/^\d{4}$/.test(sig)) anyo = sig;
+      break;
+    }
+  }
+
+  const RE_CIERRE =
+    /(domingo|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado)\s+(\d{1,2})[^)]*\((\d{1,2}):(\d{2})\)/i;
+  // Preferimos el cierre general ("Particulares") sobre variantes (DNP…); si no,
+  // el primer candidato válido.
+  let cierreLinea: string | null = null;
+  for (const l of lineas) {
+    if (!RE_CIERRE.test(l)) continue;
+    if (/particular/i.test(l)) {
+      cierreLinea = l;
+      break;
+    }
+    if (cierreLinea === null) cierreLinea = l;
+  }
+
+  let fechaCierre: string | null = null;
+  if (cierreLinea) {
+    const m = cierreLinea.match(RE_CIERRE);
+    const wd = m ? DIAS_SEMANA[sinTildes(m[1])] : undefined;
+    if (m && wd !== undefined) {
+      fechaCierre = fechaCierreDesdeDiaSemana(wd, +m[2], +m[3], +m[4], ahoraMs);
+    }
+  }
+
+  return { numeroJornada, anyo, fechaCierre };
+}
+
+export interface BoletoMundoDeportivo extends CabeceraBoleto {
+  partidos: PartidoBoleto[];
+}
+
+/**
+ * Descarga el boleto vigente de Mundo Deportivo y devuelve la cabecera (número
+ * de jornada, año, fecha de cierre) junto con los 15 partidos. Mundo Deportivo
+ * es accesible desde Vercel (a diferencia de SELAE, bloqueado por Akamai).
  * Lanza JornadaFetchError si la página falla o no se obtienen los 15 partidos.
  */
-export async function obtenerPartidosMundoDeportivo(
+export async function obtenerBoletoMundoDeportivo(
   timeoutMs = 25_000,
-): Promise<PartidoBoleto[]> {
-  // fetch con timeout y límite de tamaño (ver src/lib/fetchExterno.ts).
+): Promise<BoletoMundoDeportivo> {
   const res = await fetchTextoExterno(MUNDO_DEPORTIVO_QUINIELA_URL, {
     headers: {
       'User-Agent':
@@ -242,6 +327,7 @@ export async function obtenerPartidosMundoDeportivo(
     timeoutMs,
   });
 
+  console.info(`[mundoDeportivo] GET /servicios/quiniela -> ${res.status}`);
   if (!res.ok) {
     throw new JornadaFetchError(
       `Mundo Deportivo respondió ${res.status}.`,
@@ -249,7 +335,8 @@ export async function obtenerPartidosMundoDeportivo(
     );
   }
 
-  const partidos = parseaBoleto(res.texto);
+  const lineas = htmlALineas(res.texto);
+  const partidos = partidosDeLineas(lineas);
 
   if (partidos.length !== TOTAL) {
     throw new JornadaFetchError(
@@ -260,7 +347,6 @@ export async function obtenerPartidosMundoDeportivo(
     );
   }
 
-  // Los números deben ser 1..15 sin huecos.
   const esperado = Array.from({ length: TOTAL }, (_, i) => i + 1);
   if (!esperado.every((n, i) => partidos[i]?.numero === n)) {
     throw new JornadaFetchError(
@@ -269,5 +355,11 @@ export async function obtenerPartidosMundoDeportivo(
     );
   }
 
-  return partidos;
+  const cabecera = parseaCabeceraBoleto(lineas);
+  console.info(
+    `[mundoDeportivo] cabecera: jornada=${cabecera.numeroJornada}, anyo=${cabecera.anyo}, ` +
+      `cierre=${cabecera.fechaCierre ?? 'null'}`,
+  );
+
+  return { ...cabecera, partidos };
 }
