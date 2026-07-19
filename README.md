@@ -446,23 +446,22 @@ desfase es inocuo. Ajusta `vercel.json` si quieres exactitud todo el año.
 
 ```
 → Consultando la jornada ABIERTA de La Quiniela…
-  (cabecera: SELAE proximosv3 · partidos: Mundo Deportivo)
+  (fuente primaria: Mundo Deportivo · SELAE solo como respaldo)
 
 ✅ Jornada abierta obtenida con sus 15 partidos:
 
-   Jornada 72 - 2026  (abierta a apuestas)
+   Jornada 73 - 2026  (abierta a apuestas)
    Fuente de los partidos: Mundo Deportivo
-   Cierre:   10/7/2026, 18:00:00
-   idSorteo: 1316106041
+   Cierre:   17/7/2026, 18:00:00
 
    Nº  Local                      Visitante
    ──  ─────────────────────────  ─────────────────────────
-    1  España                     Bélgica
-    2  Noruega                    Inglaterra
-    3  Argentina                  Suiza
+    1  Bodoglimt                  Fredrikstad
+    2  Hamkan                     Tromso
+    3  Lillestrom                 Kfum Oslo
    ...
-   14  Brann                      Ik Start
-   15  Sarpsborg                  Viking       ← Pleno al 15
+   14  Kalmar                     Malmo
+   15  España                     Argentina    ← Pleno al 15
 
    Total: 15 partidos.
 ```
