@@ -14,19 +14,18 @@ export { aIso };
  *
  * ARQUITECTURA DE FUENTES (comprobada con peticiones reales, 2026-07):
  *
- *  1. CABECERA — SELAE, `GET /servicios/proximosv3?game_id=LAQU&num=1`
- *     Devuelve el número de jornada, año, fecha de cierre y `id_sorteo` de la
- *     próxima jornada abierta a apuestas. NO incluye los emparejamientos.
+ *  1. FUENTE PRIMARIA — Mundo Deportivo, `GET /servicios/quiniela`
+ *     Publica el boleto vigente completo: los 15 partidos, el número de
+ *     jornada, el año y (si es parseable) la fecha de cierre. Es accesible
+ *     desde Vercel, a diferencia de SELAE. Ver `src/lib/mundoDeportivo.ts`.
  *
- *  2. LOS 15 PARTIDOS — Mundo Deportivo (fuente primaria).
- *     Los endpoints de SELAE NO publican los emparejamientos de la jornada
- *     abierta: `buscadorSorteos` solo devuelve jornadas ya celebradas. Mundo
- *     Deportivo sí publica el boleto vigente, así que de ahí salen los 15
- *     partidos. Ver `src/lib/mundoDeportivo.ts`.
- *
- *  3. RESPALDO — SELAE, `GET /servicios/buscadorSorteos?...`
- *     Útil cuando la jornada ya se celebró (o si Mundo Deportivo cambia).
- *     Ojo: las fechas son de 8 dígitos (AAAAMMDD), sin hora.
+ *  2. RESPALDO — SELAE (solo si Mundo Deportivo no basta).
+ *     `proximosv3` da la cabecera (jornada/año/cierre/id_sorteo) y
+ *     `buscadorSorteos` los partidos de jornadas ya celebradas (fechas de 8
+ *     dígitos AAAAMMDD, sin hora). SELAE bloquea con Akamai (HTTP 403) las IPs
+ *     de datacenter como las de Vercel, así que en producción casi nunca
+ *     responde: por eso solo se consulta cuando Mundo Deportivo no trajo los
+ *     partidos o el número de jornada, nunca en el camino normal.
  *
  * Si nada funciona se lanza JornadaFetchError y el panel de admin ofrece el
  * FALLBACK MANUAL. La app nunca depende en exclusiva de una fuente externa.
@@ -463,19 +462,12 @@ export async function obtenerJornadaActual(
     if (cacheada) return cacheada;
   }
 
-  // 1) Cabecera de SELAE: mejor esfuerzo, no es bloqueante.
-  let cab: CabeceraSorteo | null = null;
-  let errorCabecera: string | null = null;
-  try {
-    cab = await obtenerCabeceraJornada();
-  } catch (e) {
-    errorCabecera = e instanceof JornadaFetchError ? e.message : String(e);
-  }
-
-  // 2) Partidos + cabecera de Mundo Deportivo (fuente PRIMARIA; accesible desde
-  //    Vercel, a diferencia de SELAE, bloqueado por Akamai). De aquí salen el
-  //    número de jornada, el año y —si es parseable— la fecha de cierre.
+  // 1) Partidos + cabecera de Mundo Deportivo (fuente PRIMARIA; accesible desde
+  //    Vercel, a diferencia de SELAE, bloqueado por Akamai). De aquí salen los
+  //    15 partidos, el número de jornada, el año y —si es parseable— la fecha
+  //    de cierre. En el camino normal NO se llama a SELAE.
   const errores: string[] = [];
+  let cab: CabeceraSorteo | null = null;
   let partidos: PartidoJornada[] | null = null;
   let fuente: FuentePartidos = 'MUNDO_DEPORTIVO';
   let celebrada = false;
@@ -495,11 +487,21 @@ export async function obtenerJornadaActual(
     );
   }
 
-  // Relleno best-effort con la cabecera de SELAE (por si Mundo Deportivo falló
-  // en algún campo). SELAE suele estar bloqueado desde Vercel.
-  numeroJornada = numeroJornada ?? cab?.numeroJornada ?? null;
-  anyo = anyo ?? cab?.anyo ?? null;
-  fechaCierre = fechaCierre ?? cab?.fechaCierre ?? null;
+  // SELAE solo se consulta si Mundo Deportivo no bastó: faltan los partidos o el
+  // número de jornada. Así el camino normal (MD OK) no gasta un intento fallido
+  // contra SELAE, que además está bloqueado por Akamai desde Vercel (HTTP 403).
+  if (!partidos || numeroJornada === null) {
+    try {
+      cab = await obtenerCabeceraJornada();
+      numeroJornada = numeroJornada ?? cab.numeroJornada;
+      anyo = anyo ?? cab.anyo;
+      fechaCierre = fechaCierre ?? cab.fechaCierre;
+    } catch (e) {
+      errores.push(
+        `Cabecera SELAE: ${e instanceof JornadaFetchError ? e.message : String(e)}`,
+      );
+    }
+  }
 
   // Respaldo de partidos: SELAE (solo jornadas ya publicadas/celebradas).
   if (!partidos && cab) {
@@ -514,7 +516,6 @@ export async function obtenerJornadaActual(
   }
 
   if (!partidos) {
-    if (errorCabecera) errores.push(`Cabecera SELAE: ${errorCabecera}`);
     throw new JornadaFetchError(
       'No se pudieron obtener los 15 partidos de la jornada.',
       `${errores.join(' | ')}. Usa el formulario manual del panel de administración.`,

@@ -55,7 +55,7 @@ function hoyYmd(): string {
 async function main() {
   console.log(
     '→ Consultando la jornada ABIERTA de La Quiniela…\n' +
-      '  (cabecera: SELAE proximosv3 · partidos: Mundo Deportivo)\n',
+      '  (fuente primaria: Mundo Deportivo · SELAE solo como respaldo)\n',
   );
 
   try {

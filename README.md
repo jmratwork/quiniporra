@@ -330,9 +330,12 @@ dato no se puede extraer, queda `null`.
 
 **`GET https://www.loteriasyapuestas.es/servicios/proximosv3?game_id=LAQU&num=1`**
 
-Endpoint JSON **no documentado** de la Web de SELAE. Cuando es accesible (no
-desde Vercel), aporta `id_sorteo`, fecha de sorteo y **rellena** el número de
-jornada o la fecha de cierre si Mundo Deportivo no los trajo. Su parser
+Endpoint JSON **no documentado** de la Web de SELAE. **Solo se consulta si Mundo
+Deportivo no bastó** (faltan los partidos o el número de jornada): así el camino
+normal no gasta un intento fallido contra SELAE, que además **bloquea con Akamai
+(HTTP 403) las IPs de Vercel**. Cuando es accesible (p. ej. desde tu máquina),
+aporta `id_sorteo`, fecha de sorteo y **rellena** el número de jornada o la fecha
+de cierre si faltaban. Su parser
 (`parseaCabecera`) es **robusto**: admite array, objeto único u **objeto
 anidado**, y variantes de nombre (`jornada`/`numero_jornada`,
 `cierre`/`fecha_cierre`, `anyo`/`anio`, `id_sorteo`/`idsorteo`…), con las mismas
