@@ -156,7 +156,9 @@ Verás tres cosas:
    a mano si no puedes escanear). Al hacerlo, la app crea una entrada para
    quiniporra y empieza a mostrar un código de 6 dígitos que cambia cada 30 s.
 2. El valor **`TOTP_SECRET="…"`** (base32) → cópialo a la variable de entorno
-   (`.env` en local, *Environment Variables* en Vercel).
+   (`.env` en local, *Environment Variables* en Vercel). El script genera uno de
+   **160 bits** (32 caracteres); si lo pones a mano, debe tener **≥26 caracteres
+   base32 (≥128 bits)** o el servidor lo rechaza en producción.
 3. Un **código de 6 dígitos** que imprime el propio script.
 
 **Cómo funciona el segundo factor (y por qué importa el paso 3).** Un código

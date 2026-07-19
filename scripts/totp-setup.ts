@@ -11,15 +11,15 @@
  * El secreto NO se guarda en ningún fichero: cópialo tú a tu gestor de
  * secretos / .env. Ejecútalo una sola vez (o cuando quieras rotar el secreto).
  */
-import { authenticator } from 'otplib';
+import { generateSecret, generateURI, generateSync } from 'otplib';
 import qrcode from 'qrcode';
 
 const CUENTA = process.env.TOTP_CUENTA ?? 'admin';
 const EMISOR = process.env.TOTP_EMISOR ?? 'quiniporra';
 
 async function main() {
-  const secret = authenticator.generateSecret(); // base32
-  const otpauth = authenticator.keyuri(CUENTA, EMISOR, secret);
+  const secret = generateSecret(); // base32, 160 bits (≥128 bits requeridos)
+  const otpauth = generateURI({ issuer: EMISOR, label: CUENTA, secret });
 
   console.log('\n🔐 Enrolamiento del doble factor (TOTP) para quiniporra\n');
   console.log('1) Escanea este QR con tu app de autenticación:\n');
@@ -37,7 +37,7 @@ async function main() {
 
   console.log('3) Comprueba que funciona: el código de 6 dígitos que muestra tu app');
   console.log('   ahora mismo debería ser:\n');
-  console.log(`   ${authenticator.generate(secret)}   (cambia cada 30 s)\n`);
+  console.log(`   ${generateSync({ secret })}   (cambia cada 30 s)\n`);
 }
 
 main().catch((e) => {

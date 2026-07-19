@@ -1,4 +1,4 @@
-import { authenticator } from 'otplib';
+import { verifySync } from 'otplib';
 import { AdminAuthError } from './auth';
 
 /**
@@ -18,12 +18,15 @@ import { AdminAuthError } from './auth';
  * `lib/authStore.ts` porque debe funcionar entre instancias serverless.
  */
 
-// Ventana de ±1 paso (30 s) para tolerar desfase de reloj del móvil.
-authenticator.options = { window: 1, step: 30 };
+// Parámetros RFC 6238 (otplib usa por defecto SHA-1 y 6 dígitos).
+const PERIODO_S = 30; // segundos por paso de tiempo.
+// Tolerancia de ±30 s = ventana de ±1 paso, para el desfase de reloj del móvil.
+const TOLERANCIA_S = 30;
 
 // Longitud mínima del secreto base32 en producción: 26 chars ≈ 128 bits de
-// entropía. `npm run totp:setup` genera uno válido; esto evita que un operador
-// ponga a mano un valor corto/débil en las variables de entorno.
+// entropía (otplib v13 además rechaza cualquier secreto de menos de 16 bytes).
+// `npm run totp:setup` genera uno de 160 bits; esto evita que un operador ponga
+// a mano un valor corto/débil en las variables de entorno.
 const TOTP_SECRET_MIN = 26;
 
 export function totpConfigurado(): boolean {
@@ -74,10 +77,17 @@ export function comprobarTotp(code: string): ResultadoTotp {
   const limpio = (code ?? '').replace(/\s+/g, '');
   if (!/^\d{6}$/.test(limpio)) return { valido: false, paso: null };
 
-  // checkDelta devuelve el desfase (-1, 0, 1) respecto al paso actual, o null.
-  const delta = authenticator.checkDelta(limpio, secreto);
-  if (delta === null) return { valido: false, paso: null };
-
-  const paso = Math.floor(Date.now() / 1000 / 30) + delta;
-  return { valido: true, paso };
+  // Comprobación en tiempo constante contra la ventana de tolerancia. Devuelve
+  // el paso de tiempo consumido (`timeStep`), que alimenta el anti-replay
+  // compartido en authStore (nunca se acepta dos veces el mismo paso).
+  const r = verifySync({
+    secret: secreto,
+    token: limpio,
+    period: PERIODO_S,
+    epochTolerance: TOLERANCIA_S,
+  });
+  // Usamos siempre la estrategia TOTP (por defecto), cuyo resultado válido trae
+  // `timeStep`. El type guard descarta la variante HOTP (imposible aquí).
+  if (!r.valid || !('timeStep' in r)) return { valido: false, paso: null };
+  return { valido: true, paso: r.timeStep };
 }
