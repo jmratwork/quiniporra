@@ -311,6 +311,20 @@ Endpoint JSON **no documentado** que usa la propia Web de SELAE. Devuelve la
 **cabecera** de la próxima jornada abierta: número de jornada, año, fecha de
 cierre, fecha de sorteo e `id_sorteo`. **No incluye los emparejamientos.**
 
+El parser de la cabecera (`parseaCabecera` en
+[`src/lib/jornadaFetcher.ts`](src/lib/jornadaFetcher.ts)) es **robusto**: admite
+la respuesta como array, objeto único u **objeto anidado** bajo claves
+envolventes, y varias **variantes de nombre** (`jornada`/`numero_jornada`,
+`cierre`/`fecha_cierre`, `anyo`/`anio`, `id_sorteo`/`idsorteo`…). Las fechas se
+convierten a **ISO 8601** interpretando las cadenas sin zona horaria como **hora
+de España** (`Europe/Madrid`, CET/CEST según DST — importante porque el servidor
+de Vercel corre en UTC); las fechas nulas o inválidas dan `null`. Si **no** se
+puede determinar el número de jornada y la fecha de cierre, la carga automática
+**no crea una jornada genérica**: devuelve un error explícito y **reintentable**
+(el cron reintenta; el admin puede usar el formulario manual). Cada respuesta
+registra de forma **segura** su estado, tipo JSON y **claves reales** (nunca
+valores ni cuerpos) para diagnóstico.
+
 ### 2. Los 15 partidos → Mundo Deportivo
 
 **`GET https://www.mundodeportivo.com/servicios/quiniela`**

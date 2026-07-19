@@ -108,10 +108,62 @@ function primerCampo(obj: Record<string, unknown>, claves: string[]): unknown {
   return undefined;
 }
 
-/** "2026-07-12 00:00:00" | ISO -> ISO 8601, o null. */
-function aIso(v: unknown): string | null {
-  if (typeof v !== 'string' || v.trim() === '') return null;
-  const s = v.includes('T') ? v : v.replace(' ', 'T');
+/**
+ * Minutos que la hora local de Europe/Madrid va por delante de UTC en un
+ * instante dado (60 en invierno CET, 120 en verano CEST).
+ */
+function offsetMadridMin(utcMs: number): number {
+  const d = new Date(utcMs);
+  const enMadrid = new Date(d.toLocaleString('en-US', { timeZone: 'Europe/Madrid' }));
+  const enUtc = new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }));
+  return Math.round((enMadrid.getTime() - enUtc.getTime()) / 60000);
+}
+
+/** Interpreta unos componentes naive como hora de España y devuelve ISO UTC. */
+function naiveMadridAIso(
+  Y: number,
+  Mo: number,
+  D: number,
+  h: number,
+  mi: number,
+  se: number,
+): string | null {
+  // Rechaza valores fuera de rango (fechas inválidas).
+  if (Mo < 1 || Mo > 12 || D < 1 || D > 31 || h > 23 || mi > 59 || se > 59) return null;
+  const utcGuess = Date.UTC(Y, Mo - 1, D, h, mi, se);
+  if (Number.isNaN(utcGuess)) return null;
+  const real = utcGuess - offsetMadridMin(utcGuess) * 60000;
+  const d = new Date(real);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/**
+ * Convierte una fecha de SELAE a ISO 8601 (UTC), o null si es nula/inválida.
+ * Contempla: fechas ya con zona horaria (Z/±hh:mm), fechas naive sin zona
+ * ("YYYY-MM-DD HH:MM:SS", interpretadas como hora de España) y solo-fecha.
+ */
+export function aIso(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  if (s === '') return null;
+
+  // Ya trae zona horaria explícita -> se respeta.
+  if (/([zZ]|[+-]\d{2}:?\d{2})$/.test(s)) {
+    const d = new Date(s.includes('T') ? s : s.replace(' ', 'T'));
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  // Naive con hora: "YYYY-MM-DD HH:MM[:SS]" o con "T".
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (m) {
+    return naiveMadridAIso(+m[1], +m[2], +m[3], +m[4], +m[5], m[6] ? +m[6] : 0);
+  }
+
+  // Solo fecha: "YYYY-MM-DD" -> medianoche de España.
+  const md = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (md) return naiveMadridAIso(+md[1], +md[2], +md[3], 0, 0, 0);
+
+  // Último recurso: que lo intente Date (formatos raros); null si no cuela.
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
@@ -134,12 +186,31 @@ function ymdMasDias(ymd: string, dias: number): string {
   return `${fecha.getUTCFullYear()}${mm}${dd}`;
 }
 
+/** Lista (segura) de claves de un objeto: solo nombres, nunca valores. */
+function clavesDe(o: object): string {
+  const ks = Object.keys(o as Record<string, unknown>);
+  return ks.slice(0, 20).join(',') + (ks.length > 20 ? `…(+${ks.length - 20})` : '');
+}
+
+/** Descripción SEGURA de la forma de una respuesta: tipo, tamaño y claves. */
+function describeForma(json: unknown): string {
+  if (Array.isArray(json)) {
+    const primero = json.find((x) => x && typeof x === 'object' && !Array.isArray(x));
+    return `array(${json.length})${primero ? ` claves[0]: ${clavesDe(primero)}` : ''}`;
+  }
+  if (json && typeof json === 'object') return `objeto claves: ${clavesDe(json)}`;
+  return `tipo ${typeof json}`;
+}
+
 async function pedirJson(url: string): Promise<unknown> {
+  const ruta = url.replace(BASE, '');
   // fetch con timeout y límite de tamaño (ver src/lib/fetchExterno.ts).
   const res = await fetchTextoExterno(url, { headers: BROWSER_HEADERS });
   if (!res.ok) {
+    // Registro seguro: solo el estado, nunca el cuerpo.
+    console.warn(`[jornadaFetcher] GET ${ruta} -> HTTP ${res.status} ${res.statusText}`);
     throw new JornadaFetchError(
-      `SELAE respondió ${res.status} en ${url.replace(BASE, '')}.`,
+      `SELAE respondió ${res.status} en ${ruta}.`,
       `HTTP ${res.status} ${res.statusText}. La fuente puede estar bloqueando peticiones automatizadas (Akamai).`,
     );
   }
@@ -148,6 +219,7 @@ async function pedirJson(url: string): Promise<unknown> {
   try {
     json = JSON.parse(texto);
   } catch {
+    console.warn(`[jornadaFetcher] GET ${ruta} -> ${res.status} pero JSON no válido`);
     throw new JornadaFetchError(
       'SELAE no devolvió JSON válido (posible página de bloqueo).',
       texto.slice(0, 200),
@@ -155,8 +227,11 @@ async function pedirJson(url: string): Promise<unknown> {
   }
   // Estos endpoints devuelven un string cuando no hay datos o los parámetros fallan.
   if (typeof json === 'string') {
+    console.warn(`[jornadaFetcher] GET ${ruta} -> ${res.status} string: "${json.slice(0, 80)}"`);
     throw new JornadaFetchError('SELAE no devolvió datos para la consulta.', json);
   }
+  // Registro seguro de la forma (estado, tipo JSON y CLAVES reales; sin valores).
+  console.info(`[jornadaFetcher] GET ${ruta} -> ${res.status}; ${describeForma(json)}`);
   return json;
 }
 
@@ -173,29 +248,131 @@ export interface CabeceraSorteo {
   idSorteo: string | null;
 }
 
-function parseaCabecera(data: unknown): CabeceraSorteo {
-  const arr = Array.isArray(data) ? data : [data];
-  const primero = arr.find((x) => x && typeof x === 'object') as
-    | Record<string, unknown>
-    | undefined;
-  if (!primero) throw new JornadaFetchError('SELAE no devolvió ningún sorteo próximo.');
+// Variantes de nombres de campo (SELAE cambia formato sin avisar).
+const CLAVES_JORNADA = [
+  'jornada',
+  'numeroJornada',
+  'numero_jornada',
+  'numJornada',
+  'num_jornada',
+  'nroJornada',
+];
+const CLAVES_ANYO = ['anyo', 'anio', 'año', 'year', 'temporada'];
+const CLAVES_CIERRE = [
+  'cierre',
+  'fechaCierre',
+  'fecha_cierre',
+  'fechacierre',
+  'cierreApuestas',
+  'fecha_fin',
+  'fechaFin',
+];
+const CLAVES_FECHA = [
+  'fecha',
+  'fecha_sorteo',
+  'fechaSorteo',
+  'fechaCelebracion',
+  'fecha_celebracion',
+];
+const CLAVES_ID = ['id_sorteo', 'idSorteo', 'idsorteo', 'id'];
 
-  const jornadaNum = primerCampo(primero, ['jornada', 'numeroJornada', 'numero']);
-  const fechaRaw = primerCampo(primero, ['fecha', 'fecha_sorteo', 'fechaSorteo']);
+/** Busca una clave en el objeto y, si no está, en sus objetos anidados. */
+function primerCampoProfundo(
+  obj: Record<string, unknown>,
+  claves: string[],
+  prof = 0,
+): unknown {
+  const directo = primerCampo(obj, claves);
+  if (directo !== undefined) return directo;
+  if (prof >= 3) return undefined;
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const r = primerCampoProfundo(v as Record<string, unknown>, claves, prof + 1);
+      if (r !== undefined) return r;
+    }
+  }
+  return undefined;
+}
+
+/** ¿Este objeto parece la cabecera de un sorteo (tiene jornada/cierre/fecha/id)? */
+function pareceSorteo(obj: Record<string, unknown>): boolean {
+  return (
+    primerCampo(obj, CLAVES_JORNADA) !== undefined ||
+    primerCampo(obj, CLAVES_CIERRE) !== undefined ||
+    primerCampo(obj, CLAVES_FECHA) !== undefined ||
+    primerCampo(obj, CLAVES_ID) !== undefined
+  );
+}
+
+/**
+ * Localiza el objeto "sorteo" en una respuesta que puede venir como array de
+ * objetos (proximosv3), objeto único, o envuelto en una clave (p. ej.
+ * { data: [...] }, { sorteos: [...] }, { resultado: {...} }).
+ */
+function localizaSorteo(data: unknown, prof = 0): Record<string, unknown> | null {
+  if (prof > 5 || data === null || typeof data !== 'object') return null;
+  if (Array.isArray(data)) {
+    for (const it of data) {
+      const r = localizaSorteo(it, prof + 1);
+      if (r) return r;
+    }
+    return null;
+  }
+  const obj = data as Record<string, unknown>;
+  if (pareceSorteo(obj)) return obj;
+  for (const v of Object.values(obj)) {
+    const r = localizaSorteo(v, prof + 1);
+    if (r) return r;
+  }
+  return null;
+}
+
+/** Convierte un valor a entero positivo, o null. */
+function aEntero(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v);
+  if (typeof v === 'string') {
+    const m = v.match(/\d+/);
+    if (m) return parseInt(m[0], 10);
+  }
+  return null;
+}
+
+/**
+ * Parsea la cabecera del sorteo de forma robusta: admite objetos anidados y
+ * varias variantes de nombres de campo (numero_jornada, fecha_cierre, …).
+ * Exportada para pruebas unitarias.
+ */
+export function parseaCabecera(data: unknown): CabeceraSorteo {
+  const sorteo = localizaSorteo(data);
+  if (!sorteo) {
+    console.warn(
+      `[jornadaFetcher] cabecera SELAE: no se encontró ningún sorteo; ${describeForma(data)}`,
+    );
+    throw new JornadaFetchError('SELAE no devolvió ningún sorteo próximo.');
+  }
+
+  const numeroJornada = aEntero(primerCampoProfundo(sorteo, CLAVES_JORNADA));
+  const fechaCierre = aIso(primerCampoProfundo(sorteo, CLAVES_CIERRE));
+  const fechaRaw = primerCampoProfundo(sorteo, CLAVES_FECHA);
+  const anyoRaw = primerCampoProfundo(sorteo, CLAVES_ANYO);
+  const idRaw = primerCampoProfundo(sorteo, CLAVES_ID);
+
+  // Aviso de diagnóstico si falta lo esencial (claves reales, sin valores).
+  if (numeroJornada === null || fechaCierre === null) {
+    console.warn(
+      `[jornadaFetcher] cabecera SELAE incompleta ` +
+        `(numeroJornada=${numeroJornada}, fechaCierre=${fechaCierre === null ? 'null' : 'ok'}); ` +
+        `claves reales: ${clavesDe(sorteo)}`,
+    );
+  }
+
   return {
-    numeroJornada:
-      typeof jornadaNum === 'number'
-        ? jornadaNum
-        : typeof jornadaNum === 'string' && /^\d+$/.test(jornadaNum)
-          ? parseInt(jornadaNum, 10)
-          : null,
-    anyo: (primerCampo(primero, ['anyo', 'anio']) as string | undefined) ?? null,
-    fechaCierre: aIso(primerCampo(primero, ['cierre', 'fechaCierre'])),
+    numeroJornada,
+    anyo: anyoRaw != null ? String(anyoRaw) : null,
+    fechaCierre,
     fechaSorteo: aIso(fechaRaw),
     fechaSorteoYmd: aYmd(fechaRaw),
-    idSorteo:
-      (primerCampo(primero, ['id_sorteo', 'idSorteo']) as string | number | undefined)
-        ?.toString() ?? null,
+    idSorteo: idRaw != null ? String(idRaw) : null,
   };
 }
 
@@ -392,12 +569,24 @@ export async function obtenerJornadaActual(
     );
   }
 
+  // No creamos una jornada "genérica": exigimos número de jornada y fecha de
+  // cierre reales de la cabecera. Si faltan, error EXPLÍCITO y REINTENTABLE
+  // (el cron lo reintenta; el admin puede usar el formulario manual).
+  if (!cab || cab.numeroJornada === null || cab.fechaCierre === null) {
+    throw new JornadaFetchError(
+      'No se pudo determinar el número de jornada y la fecha de cierre desde SELAE.',
+      `${errorCabecera ? `Cabecera: ${errorCabecera}. ` : ''}` +
+        `numeroJornada=${cab?.numeroJornada ?? 'null'}, fechaCierre=${cab?.fechaCierre ?? 'null'}. ` +
+        'Reintentable en el siguiente disparo del cron; si persiste, usa el formulario manual.',
+    );
+  }
+
   const resultado: JornadaObtenida = {
     jornada: nombreJornada(cab),
-    numeroJornada: cab?.numeroJornada ?? null,
-    fechaCierre: cab?.fechaCierre ?? null,
-    fechaSorteo: cab?.fechaSorteo ?? null,
-    idSorteo: cab?.idSorteo ?? null,
+    numeroJornada: cab.numeroJornada,
+    fechaCierre: cab.fechaCierre,
+    fechaSorteo: cab.fechaSorteo,
+    idSorteo: cab.idSorteo,
     celebrada,
     fuente,
     partidos,
