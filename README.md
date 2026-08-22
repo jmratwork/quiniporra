@@ -446,24 +446,26 @@ desfase es inocuo. Ajusta `vercel.json` si quieres exactitud todo el año.
 
 ### Ejemplo real de `npm run fetch:jornada`
 
+_La jornada mostrada varía cada semana; este es un volcado real a modo de ejemplo._
+
 ```
 → Consultando la jornada ABIERTA de La Quiniela…
   (fuente primaria: Mundo Deportivo · SELAE solo como respaldo)
 
 ✅ Jornada abierta obtenida con sus 15 partidos:
 
-   Jornada 73 - 2026  (abierta a apuestas)
+   Jornada 2 - 2027  (abierta a apuestas)
    Fuente de los partidos: Mundo Deportivo
-   Cierre:   17/7/2026, 18:00:00
+   Cierre:   22/8/2026, 16:00:00
 
    Nº  Local                      Visitante
    ──  ─────────────────────────  ─────────────────────────
-    1  Bodoglimt                  Fredrikstad
-    2  Hamkan                     Tromso
-    3  Lillestrom                 Kfum Oslo
+    1  Ath.Club                   Sevilla
+    2  Valencia                   Celta
+    3  Espanyol                   R.Madrid
    ...
-   14  Kalmar                     Malmo
-   15  España                     Argentina    ← Pleno al 15
+   14  Tenerife                   Almería
+   15  At.Madrid                  Villarreal    ← Pleno al 15
 
    Total: 15 partidos.
 ```
