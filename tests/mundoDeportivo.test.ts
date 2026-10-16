@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseaBoleto,
+  htmlALineas,
   limpiaNombreEquipo,
   capitaliza,
   pareceUnPartido,
@@ -102,6 +103,17 @@ describe('limpiaNombreEquipo', () => {
 
   it('trunca a la longitud máxima', () => {
     expect(limpiaNombreEquipo('A'.repeat(100)).length).toBe(48);
+  });
+
+  it('decodifica entidades numéricas válidas', () => {
+    expect(limpiaNombreEquipo('Espa&#241;a - B&#xE9;lgica')).toBe('España - Bélgica');
+  });
+
+  it('no lanza con entidades fuera de rango o surrogates sueltos (las cambia por espacio)', () => {
+    expect(limpiaNombreEquipo('A&#99999999999;B')).toBe('A B');
+    expect(limpiaNombreEquipo('A&#x110000;B')).toBe('A B');
+    expect(limpiaNombreEquipo('A&#xD800;B')).toBe('A B');
+    expect(htmlALineas('<p>Real&#xFFFFFFFFFFFF;Madrid</p>')).toEqual(['Real Madrid']);
   });
 });
 

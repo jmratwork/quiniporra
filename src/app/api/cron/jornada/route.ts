@@ -22,8 +22,9 @@ function bearerValido(header: string | null, secret: string): boolean {
  *
  * Autenticación: cabecera `Authorization: Bearer <CRON_SECRET>` que Vercel añade
  * automáticamente cuando `CRON_SECRET` está definido (comparada en tiempo
- * constante). En producción es OBLIGATORIO y debe tener al menos 32 caracteres;
- * en desarrollo, si no hay CRON_SECRET, se permite (para pruebas).
+ * constante). Es OBLIGATORIO y debe tener al menos 32 caracteres en cualquier
+ * entorno salvo en desarrollo (`next dev`), donde sin CRON_SECRET se permite
+ * (para pruebas).
  *
  * La carga es idempotente y no destructiva (ver lib/cargaJornada.ts): 502 si la
  * fuente externa falla.
@@ -31,9 +32,9 @@ function bearerValido(header: string | null, secret: string): boolean {
 export async function GET(req: NextRequest) {
   try {
     const secret = process.env.CRON_SECRET;
-    const esProd = process.env.NODE_ENV === 'production';
+    const esDesarrollo = process.env.NODE_ENV === 'development';
 
-    if (esProd && (!secret || secret.length < CRON_SECRET_MIN)) {
+    if (!esDesarrollo && (!secret || secret.length < CRON_SECRET_MIN)) {
       return error(
         `CRON_SECRET no está configurado correctamente (mín. ${CRON_SECRET_MIN} caracteres).`,
         500,

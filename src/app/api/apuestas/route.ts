@@ -94,6 +94,11 @@ export async function POST(req: NextRequest) {
     // la Quiniela si es la 15.ª apuesta.
     try {
       const resultado = await prisma.$transaction(async (tx) => {
+        // Bloquea la fila de la Quiniela para serializar sus apuestas. Sin
+        // esto, con READ COMMITTED, dos apuestas finales simultáneas contarían
+        // 14 cada una y ninguna cerraría la Quiniela.
+        await tx.$queryRaw`SELECT id FROM quinielas WHERE id = ${inv.partido.quinielaId} FOR UPDATE`;
+
         const apuesta = await tx.apuesta.create({
           data: {
             partidoId: inv.partido.id,

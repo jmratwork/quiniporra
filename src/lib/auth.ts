@@ -14,11 +14,11 @@ import { sesionRevocada, revocarJti } from './authStore';
  * firmada (lib/session.ts). Las rutas protegidas ya NO reciben el PIN en cada
  * petición: validan esa cookie con requiereSesionAdmin().
  *
- * En producción el PIN debe tener al menos 12 caracteres; si no, se considera
- * mal configurado y se rechaza cualquier acceso.
+ * Fuera de desarrollo el PIN debe tener al menos 12 caracteres; si no, se
+ * considera mal configurado y se rechaza cualquier acceso.
  */
 
-const PIN_MINIMO_PRODUCCION = 12;
+const PIN_MINIMO = 12;
 
 export class AdminAuthError extends Error {
   constructor(
@@ -35,13 +35,10 @@ function pinConfigurado(): string {
   if (!pin || pin.trim().length === 0) {
     throw new AdminAuthError(500, 'ADMIN_PIN no está configurado en el servidor.');
   }
-  if (
-    process.env.NODE_ENV === 'production' &&
-    pin.length < PIN_MINIMO_PRODUCCION
-  ) {
+  if (process.env.NODE_ENV !== 'development' && pin.length < PIN_MINIMO) {
     throw new AdminAuthError(
       500,
-      `ADMIN_PIN debe tener al menos ${PIN_MINIMO_PRODUCCION} caracteres en producción.`,
+      `ADMIN_PIN debe tener al menos ${PIN_MINIMO} caracteres (fuera de desarrollo).`,
     );
   }
   return pin;

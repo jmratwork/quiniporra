@@ -41,6 +41,11 @@ export async function POST(req: NextRequest) {
     if (q.estado === 'CERRADA') {
       return error('La Quiniela está cerrada; no admite más invitaciones.', 409);
     }
+    // Caducada (o ABIERTA con la fecha de cierre ya pasada): no admite
+    // apuestas, así que tampoco tiene sentido invitar a nadie.
+    if (q.estado === 'CADUCADA' || (q.fechaCierre && Date.now() > q.fechaCierre.getTime())) {
+      return error('La Quiniela ha caducado: pasó la fecha de cierre.', 409);
+    }
 
     const partido = await prisma.partido.findUnique({
       where: { quinielaId_numero: { quinielaId: q.id, numero: datos.numeroPartido } },

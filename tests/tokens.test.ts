@@ -5,7 +5,7 @@ let hashToken: (t: string) => string;
 let comparaHash: (a: string, b: string) => boolean;
 
 beforeAll(async () => {
-  process.env.INVITACION_SECRET = 'secreto-de-test-para-tokens';
+  process.env.INVITACION_SECRET = 'secreto-de-test-para-tokens-de-invitacion';
   const mod = await import('../src/lib/tokens');
   generaToken = mod.generaToken;
   hashToken = mod.hashToken;
@@ -38,5 +38,17 @@ describe('tokens de invitación', () => {
     expect(comparaHash(h, h)).toBe(true);
     expect(comparaHash(h, hashToken(generaToken()))).toBe(false);
     expect(comparaHash(h, h.slice(0, -1))).toBe(false); // longitudes distintas
+  });
+
+  it('fuera de desarrollo exige INVITACION_SECRET (sin valor por defecto)', () => {
+    const original = process.env.INVITACION_SECRET;
+    try {
+      delete process.env.INVITACION_SECRET;
+      expect(() => hashToken('x')).toThrow(/INVITACION_SECRET/);
+      process.env.INVITACION_SECRET = 'corto';
+      expect(() => hashToken('x')).toThrow(/INVITACION_SECRET/);
+    } finally {
+      process.env.INVITACION_SECRET = original;
+    }
   });
 });

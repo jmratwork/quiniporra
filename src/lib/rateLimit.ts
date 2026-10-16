@@ -50,15 +50,27 @@ export function rateLimit(
  * puede falsificar (`x-vercel-forwarded-for`, `x-real-ip`), porque
  * `x-forwarded-for` sí puede venir manipulada por el cliente (que la
  * antepondría para rotar de "IP" en cada intento y saltarse el límite). Solo se
- * cae a `x-forwarded-for` como último recurso fuera de Vercel.
+ * cae a `x-forwarded-for` como último recurso fuera de Vercel; en Vercel, si
+ * faltan sus cabeceras, nunca se usa. Fuera de Vercel ninguna de estas
+ * cabeceras es fiable salvo detrás de un proxy que las reescriba.
  */
 export function ipDe(req: Request): string {
   const confiable =
     req.headers.get('x-vercel-forwarded-for') ?? req.headers.get('x-real-ip');
-  if (confiable) return confiable.split(',')[0].trim();
+  if (confiable) return primeraIp(confiable);
 
-  const xff = req.headers.get('x-forwarded-for');
-  if (xff) return xff.split(',')[0].trim();
+  if (!process.env.VERCEL) {
+    const xff = req.headers.get('x-forwarded-for');
+    if (xff) return primeraIp(xff);
+  }
 
   return 'desconocida';
+}
+
+// Una IP (v6 incluida) cabe de sobra en 64 caracteres; recortar evita que una
+// cabecera enorme acabe como una clave enorme en la tabla rate_limits.
+const MAX_LONGITUD_IP = 64;
+
+function primeraIp(cabecera: string): string {
+  return cabecera.split(',')[0].trim().slice(0, MAX_LONGITUD_IP);
 }

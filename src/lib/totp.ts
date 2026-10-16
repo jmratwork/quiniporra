@@ -9,9 +9,10 @@ import { AdminAuthError } from './auth';
  * estable entre instancias serverless. El enrolamiento se hace una vez con
  * `npm run totp:setup`.
  *
- * - En producción TOTP_SECRET es OBLIGATORIO.
- * - En desarrollo, si no está configurado, se OMITE el segundo factor (con un
- *   aviso) para no bloquear el arranque local; el PIN sigue siendo obligatorio.
+ * - TOTP_SECRET es OBLIGATORIO en cualquier entorno salvo en desarrollo.
+ * - En desarrollo (`next dev`), si no está configurado, se OMITE el segundo
+ *   factor (con un aviso) para no bloquear el arranque local; el PIN sigue
+ *   siendo obligatorio.
  *
  * Este módulo hace SOLO la comprobación criptográfica (pura, sin estado). El
  * anti-replay (que un código no se use dos veces) vive en el almacén compartido
@@ -23,7 +24,7 @@ const PERIODO_S = 30; // segundos por paso de tiempo.
 // Tolerancia de ±30 s = ventana de ±1 paso, para el desfase de reloj del móvil.
 const TOLERANCIA_S = 30;
 
-// Longitud mínima del secreto base32 en producción: 26 chars ≈ 128 bits de
+// Longitud mínima del secreto base32 fuera de desarrollo: 26 chars ≈ 128 bits de
 // entropía (otplib v13 además rechaza cualquier secreto de menos de 16 bytes).
 // `npm run totp:setup` genera uno de 160 bits; esto evita que un operador ponga
 // a mano un valor corto/débil en las variables de entorno.
@@ -33,9 +34,9 @@ export function totpConfigurado(): boolean {
   return !!process.env.TOTP_SECRET;
 }
 
-/** ¿Se exige el segundo factor? Siempre en producción; en dev solo si hay secreto. */
+/** ¿Se exige el segundo factor? Siempre, salvo en desarrollo sin secreto. */
 export function totpRequerido(): boolean {
-  return totpConfigurado() || process.env.NODE_ENV === 'production';
+  return totpConfigurado() || process.env.NODE_ENV !== 'development';
 }
 
 export interface ResultadoTotp {
@@ -50,13 +51,14 @@ export interface ResultadoTotp {
 
 /**
  * Comprueba un código TOTP de 6 dígitos contra TOTP_SECRET (sin anti-replay).
- * Lanza AdminAuthError(500) si falta el secreto en producción.
+ * Lanza AdminAuthError(500) si falta el secreto fuera de desarrollo.
  */
 export function comprobarTotp(code: string): ResultadoTotp {
   const secreto = process.env.TOTP_SECRET;
+  const esDesarrollo = process.env.NODE_ENV === 'development';
 
   if (!secreto) {
-    if (process.env.NODE_ENV === 'production') {
+    if (!esDesarrollo) {
       throw new AdminAuthError(500, 'TOTP_SECRET no está configurado en el servidor.');
     }
     console.warn(
@@ -65,9 +67,9 @@ export function comprobarTotp(code: string): ResultadoTotp {
     return { valido: true, paso: null };
   }
 
-  // En producción, un secreto demasiado corto no ofrece la entropía esperada:
-  // fail-closed (500) en vez de aceptar un segundo factor debilitado.
-  if (process.env.NODE_ENV === 'production' && secreto.length < TOTP_SECRET_MIN) {
+  // Fuera de desarrollo, un secreto demasiado corto no ofrece la entropía
+  // esperada: fail-closed (500) en vez de aceptar un segundo factor debilitado.
+  if (!esDesarrollo && secreto.length < TOTP_SECRET_MIN) {
     throw new AdminAuthError(
       500,
       `TOTP_SECRET es demasiado corto (mín. ${TOTP_SECRET_MIN} caracteres base32).`,

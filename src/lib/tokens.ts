@@ -8,23 +8,25 @@ import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
  * la BD, no puede reconstruir los enlaces; y solo quien tenga el token
  * original (enviado por WhatsApp/email por el admin) puede apostar.
  *
- * En producción INVITACION_SECRET es obligatorio. En desarrollo se usa un
- * valor por defecto para no bloquear el arranque.
+ * INVITACION_SECRET es obligatorio en cualquier entorno salvo en desarrollo
+ * (`next dev`), donde se usa un valor por defecto para no bloquear el arranque.
  */
 
 const SECRETO_MIN = 32;
 
 function secreto(): string {
   const s = process.env.INVITACION_SECRET;
-  if (process.env.NODE_ENV === 'production') {
-    if (!s || s.length < SECRETO_MIN) {
-      throw new Error(
-        `INVITACION_SECRET es obligatorio y debe tener al menos ${SECRETO_MIN} caracteres en producción.`,
-      );
-    }
-    return s;
+  // Solo `next dev` admite el valor por defecto: producción, tests o un
+  // despliegue sin NODE_ENV exigen el secreto real (fail-closed).
+  if (process.env.NODE_ENV === 'development') {
+    return s && s.length > 0 ? s : 'secreto-desarrollo-inseguro';
   }
-  return s && s.length > 0 ? s : 'secreto-desarrollo-inseguro';
+  if (!s || s.length < SECRETO_MIN) {
+    throw new Error(
+      `INVITACION_SECRET es obligatorio y debe tener al menos ${SECRETO_MIN} caracteres (fuera de desarrollo).`,
+    );
+  }
+  return s;
 }
 
 /** Genera un token aleatorio para enviar al jugador (no se guarda tal cual). */

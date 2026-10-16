@@ -7,12 +7,14 @@ const SECRET = 'DHOCR5QS3PWP66CFOFNZYRFACEGQS7HY';
 
 let comprobarTotp: (code: string) => { valido: boolean; paso: number | null };
 let totpConfigurado: () => boolean;
+let totpRequerido: () => boolean;
 
 beforeAll(async () => {
   process.env.TOTP_SECRET = SECRET;
   const mod = await import('../src/lib/totp');
   comprobarTotp = mod.comprobarTotp;
   totpConfigurado = mod.totpConfigurado;
+  totpRequerido = mod.totpRequerido;
 });
 
 // --- Implementación TOTP de referencia (RFC 6238, SHA-1, 6 dígitos) --------
@@ -94,5 +96,15 @@ describe('comprobarTotp (comprobación criptográfica pura)', () => {
     expect(comprobarTotp('12345').valido).toBe(false);
     expect(comprobarTotp('abcdef').valido).toBe(false);
     expect(comprobarTotp('').valido).toBe(false);
+  });
+
+  it('fuera de desarrollo, sin TOTP_SECRET el 2FA sigue exigido y falla cerrado', () => {
+    try {
+      delete process.env.TOTP_SECRET;
+      expect(totpRequerido()).toBe(true);
+      expect(() => comprobarTotp('123456')).toThrow(/TOTP_SECRET/);
+    } finally {
+      process.env.TOTP_SECRET = SECRET;
+    }
   });
 });

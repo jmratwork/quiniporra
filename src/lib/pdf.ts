@@ -75,6 +75,26 @@ function recorta(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
 
+// Letras que NFKD no reduce a una letra base ASCII.
+const SUSTITUTOS: Record<string, string> = { Ł: 'L', ł: 'l', Đ: 'D', đ: 'd', ı: 'i' };
+
+/**
+ * Las fuentes estándar (Helvetica) solo codifican WinAnsi: un carácter fuera de
+ * ese juego (Ł, ș, emoji…) hace que pdf-lib lance y que falle el PDF entero.
+ * Devuelve una función que deja tal cual cada carácter soportado; si no lo
+ * está, prueba con su letra base (ș -> s, Ł -> L) y, si tampoco, pone '?'.
+ */
+function adaptadorFuente(font: PDFFont): (s: string) => string {
+  const soportados = new Set(font.getCharacterSet());
+  const cabe = (c: string) => soportados.has(c.codePointAt(0)!);
+  return (s) =>
+    Array.from(s, (c) => {
+      if (cabe(c)) return c;
+      const base = SUSTITUTOS[c] ?? c.normalize('NFKD').replace(/[̀-ͯ]/g, '');
+      return base.length > 0 && Array.from(base).every(cabe) ? base : '?';
+    }).join('');
+}
+
 function marca1x2(signos: Signos | null, signo: string): boolean {
   return signos?.tipo === '1X2' && signos.valores.includes(signo as never);
 }
@@ -83,6 +103,9 @@ export async function generarPdfBoleto(boleto: BoletoPdf): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  // Texto que viene de fuera (jornada, equipos, jugadores): solo caracteres
+  // que la fuente sabe codificar. Helvetica y Helvetica-Bold usan el mismo juego.
+  const t = adaptadorFuente(font);
 
   const page = doc.addPage([595.28, 841.89]); // A4
   const { width, height } = page.getSize();
@@ -104,7 +127,7 @@ export async function generarPdfBoleto(boleto: BoletoPdf): Promise<Uint8Array> {
     color: BLANCO,
   });
   page.drawText(
-    `${boleto.jornada}${boleto.fechaCierre ? '   ·   Cierre: ' + fmtFecha(boleto.fechaCierre) : ''}`,
+    t(`${boleto.jornada}${boleto.fechaCierre ? '   ·   Cierre: ' + fmtFecha(boleto.fechaCierre) : ''}`),
     {
       x: margen + 12,
       y: height - margen - 38,
@@ -191,14 +214,14 @@ export async function generarPdfBoleto(boleto: BoletoPdf): Promise<Uint8Array> {
       font: bold,
       color: p.esPleno ? VERDE : NEGRO,
     });
-    page.drawText(recorta(p.local, 22), {
+    page.drawText(recorta(t(p.local), 22), {
       x: xLocal + 2,
       y: yTexto,
       size: 9,
       font,
       color: NEGRO,
     });
-    page.drawText(recorta(p.visitante, 22), {
+    page.drawText(recorta(t(p.visitante), 22), {
       x: xVisit + 2,
       y: yTexto,
       size: 9,
@@ -218,7 +241,7 @@ export async function generarPdfBoleto(boleto: BoletoPdf): Promise<Uint8Array> {
       dibujaPleno(page, font, bold, xSignos + 2, y, p.signos);
     }
 
-    page.drawText(recorta(p.nombreJugador ?? '—', 18), {
+    page.drawText(recorta(t(p.nombreJugador ?? '—'), 18), {
       x: xApost + 2,
       y: yTexto,
       size: 9,

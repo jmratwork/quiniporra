@@ -58,4 +58,14 @@ describe('cookie de sesión firmada', () => {
     ).toString('base64url');
     expect(sesionValida(`${payloadFalso}.${firma}`)).toBe(false);
   });
+
+  it('fuera de desarrollo exige SESSION_SECRET (sin valor por defecto)', () => {
+    const original = process.env.SESSION_SECRET;
+    try {
+      delete process.env.SESSION_SECRET;
+      expect(() => crearTokenSesion()).toThrow(/SESSION_SECRET/);
+    } finally {
+      process.env.SESSION_SECRET = original;
+    }
+  });
 });

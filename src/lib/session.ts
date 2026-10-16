@@ -19,20 +19,22 @@ export const COOKIE_SESION =
   process.env.NODE_ENV === 'production' ? '__Host-quiniporra_admin' : 'quiniporra_admin';
 export const TTL_SESION_MS = 8 * 60 * 60 * 1000; // 8 horas
 
-// Longitud mínima en producción (alineada con randomBytes(32) del .env.example).
+// Longitud mínima fuera de desarrollo (alineada con randomBytes(32) del .env.example).
 const SECRETO_MIN = 32;
 
 function secreto(): string {
   const s = process.env.SESSION_SECRET;
-  if (process.env.NODE_ENV === 'production') {
-    if (!s || s.length < SECRETO_MIN) {
-      throw new Error(
-        `SESSION_SECRET es obligatorio y debe tener al menos ${SECRETO_MIN} caracteres en producción.`,
-      );
-    }
-    return s;
+  // Solo `next dev` admite el valor por defecto: producción, tests o un
+  // despliegue sin NODE_ENV exigen el secreto real (fail-closed).
+  if (process.env.NODE_ENV === 'development') {
+    return s && s.length > 0 ? s : 'sesion-desarrollo-insegura';
   }
-  return s && s.length > 0 ? s : 'sesion-desarrollo-insegura';
+  if (!s || s.length < SECRETO_MIN) {
+    throw new Error(
+      `SESSION_SECRET es obligatorio y debe tener al menos ${SECRETO_MIN} caracteres (fuera de desarrollo).`,
+    );
+  }
+  return s;
 }
 
 function firma(payload: string): string {

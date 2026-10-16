@@ -50,6 +50,16 @@ const RUIDO = ['POLITICA', 'TERMINOS', 'COOKIES', 'PUBLICIDAD', 'AVISO'];
 // Utilidades de texto
 // ---------------------------------------------------------------------------
 
+/**
+ * Carácter de una entidad numérica (&#N; / &#xN;). Un código fuera de rango o
+ * un surrogate suelto haría lanzar a String.fromCodePoint y tumbaría la carga
+ * entera de la jornada por una sola entidad rara: se cambia por un espacio.
+ */
+function caracterDeEntidad(cp: number): string {
+  const valido = Number.isInteger(cp) && cp >= 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff);
+  return valido ? String.fromCodePoint(cp) : ' ';
+}
+
 function desescapaHtml(s: string): string {
   return s
     .replace(/&nbsp;/gi, ' ')
@@ -58,8 +68,8 @@ function desescapaHtml(s: string): string {
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)));
+    .replace(/&#(\d+);/g, (_, d) => caracterDeEntidad(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => caracterDeEntidad(parseInt(h, 16)));
 }
 
 /** Convierte el HTML en líneas de texto limpias. */
