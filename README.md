@@ -215,7 +215,7 @@ Más detalle en [Seguridad del panel: doble factor (2FA)](#seguridad-del-panel-d
 ### 4. Crear las tablas
 
 ```bash
-npx prisma migrate deploy   # aplica la migración inicial ya incluida
+npx prisma migrate deploy   # aplica las migraciones ya incluidas
 # o, en desarrollo, para crear/actualizar y regenerar el cliente:
 npx prisma migrate dev
 ```
@@ -236,7 +236,8 @@ Abre <http://localhost:3000>. El panel de administración está en
 npm run fetch:jornada
 ```
 
-Hace una petición **real** a SELAE y muestra los 15 partidos. Ver la sección
+Hace una petición **real** a Mundo Deportivo (SELAE solo de respaldo) y muestra
+los 15 partidos. No usa la base de datos. Ver la sección
 [Fuente de datos de la jornada](#fuente-de-datos-de-la-jornada).
 
 ---
@@ -318,14 +319,19 @@ Luego aplica las migraciones: `npx prisma migrate deploy`.
 
 ## Fuente de datos de la jornada
 
-La carga automática combina **dos fuentes**, porque ninguna por sí sola sirve.
-Todo se hace **en el servidor** (route handler / script), nunca desde el
-navegador (evita CORS y no expone nada), enviando cabeceras de navegador
-(`User-Agent`, `Accept`, `Referer`).
+La carga de la jornada (el cron y el botón **Cargar jornada** del panel)
+combina **dos fuentes**, porque ninguna por sí sola sirve. Todo se hace **en el
+servidor** (route handler / script), nunca desde el navegador (evita CORS y no
+expone nada), enviando cabeceras de navegador (`User-Agent`, `Accept`; a SELAE,
+también `Referer`).
 
 ### 1. Todo el boleto → Mundo Deportivo (fuente primaria)
 
-**`GET https://www.mundodeportivo.com/servicios/quiniela`**
+**`GET https://www.mundodeportivo.com/servicios/quiniela?_=<marca de tiempo>`**
+
+El parámetro `_` (distinto en cada petición) y la cabecera
+`Cache-Control: no-cache` evitan que una caché intermedia devuelva una versión
+vieja de la página.
 
 Mundo Deportivo publica el **boleto vigente** y de él se obtiene **todo lo
 necesario**: los **15 partidos**, el **número de jornada** ("Jornada 73"), el
@@ -364,7 +370,7 @@ reglas de fecha (ISO en hora de España; nulos/inválidos → `null`).
 **Sin genéricos, con error reintentable.** La carga automática exige un **número
 de jornada real** (nunca crea una "Jornada actual" genérica); si no lo consigue,
 lanza un error explícito y **reintentable** (el cron lo reintenta en el siguiente
-disparo). La fecha de cierre es deseable pero **no bloqueante** (si
+disparo, y el admin puede reintentarlo con **Cargar jornada**). La fecha de cierre es deseable pero **no bloqueante** (si
 falta, se avisa y la caducidad por tiempo simplemente no se aplica). Cada
 respuesta externa registra de forma **segura** su estado, tipo JSON y **claves
 reales** (nunca valores ni cuerpos) para diagnóstico.
@@ -396,6 +402,13 @@ de control y `<`/`>`, colapsa espacios y limita la longitud, ya que ese texto
 acaba en la BD, la UI y el PDF) y **valida con Zod que hay exactamente 15
 partidos numerados del 1 al 15** antes de crear nada.
 
+**Validación de temporada.** El año del boleto ("Jornada 14" + "2027") es el año
+en que **termina** la temporada: de agosto de 2026 a julio de 2027 la vigente es
+la "2027". Se **rechaza** cualquier boleto de una temporada anterior
+(`anyoMinimoTemporada`): sería una página vieja, y su fecha de cierre no lo
+delataría, porque se infiere del día de la semana. Agosto admite las dos
+temporadas, porque la nueva arranca a mitad de mes.
+
 ### 3. Respaldo → SELAE `buscadorSorteos`
 
 **`GET /servicios/buscadorSorteos?game_id=LAQU&celebrados=<bool>&fechaInicioInclusiva=AAAAMMDD&fechaFinInclusiva=AAAAMMDD`**
@@ -407,7 +420,8 @@ sirve para jornadas ya celebradas.
 
 La orquestación vive en
 [`src/lib/jornadaFetcher.ts`](src/lib/jornadaFetcher.ts) e incluye un **caché en
-memoria de 10 minutos** para no repetir la petición externa en llamadas seguidas.
+memoria de 10 minutos** para no repetir la petición externa en llamadas seguidas
+(la carga pedida desde el panel se lo salta y consulta siempre la fuente).
 
 ### Carga programada de la jornada
 
@@ -457,8 +471,9 @@ desfase es inocuo. Ajusta `vercel.json` si quieres exactitud todo el año.
   **puede cambiar sin aviso**. Los parsers son defensivos y validados, pero
   podrían dejar de funcionar.
 - Mundo Deportivo puede publicar solo los 14 partidos y **omitir el Pleno al
-  15** hasta más cerca de la jornada. En ese caso la carga automática devuelve
-  un error claro (**502**) y se reintenta en el siguiente disparo del cron.
+  15** hasta más cerca de la jornada. En ese caso la carga devuelve un error
+  claro (**502**) y se reintenta en el siguiente disparo del cron (o con
+  **Cargar jornada**).
 - La protección **Akamai** de SELAE puede responder **403** a peticiones
   automatizadas según el cliente y la IP. En las pruebas, el `fetch` de
   **Node.js** (con cabeceras de navegador) atraviesa la protección; `curl`
@@ -466,12 +481,12 @@ desfase es inocuo. Ajusta `vercel.json` si quieres exactitud todo el año.
   cabecera de SELAE es **best-effort**, si falla se sigue adelante con los
   partidos de Mundo Deportivo.
 - Se ha visto a Mundo Deportivo servir **una vez** un boleto antiguo (otra
-  temporada) y, minutos después, el correcto. Por eso la petición lleva un
-  parámetro único y `Cache-Control: no-cache` (que ninguna caché intermedia
-  devuelva una versión vieja), y se **rechaza** cualquier boleto de una
-  temporada anterior a la vigente (SELAE etiqueta la temporada con el año en
-  que termina: en octubre de 2026 la vigente es la "2027"). Su fecha de cierre
-  no lo delataría, porque se infiere del día de la semana.
+  temporada) y, minutos después, el correcto. Lo mitigan el parámetro
+  anticaché, la [validación de temporada](#1-todo-el-boleto--mundo-deportivo-fuente-primaria)
+  y la regla de que la carga **nunca retrocede** a una jornada anterior.
+- Los nombres de los equipos del **Pleno al 15** pueden llevar pegada su posición
+  en la clasificación (p. ej. "Getafe (14 º )"), tal como aparece en la página
+  de Mundo Deportivo; se ve así en el panel y en el PDF.
 - **No hay formulario para escribir los 15 partidos a mano**: tanto el cron como
   el botón **Cargar jornada** dependen de las fuentes. Si ambas fallasen a la
   vez, no se puede cargar la jornada hasta que la fuente se restablezca.
@@ -590,8 +605,10 @@ curl -c cookies.txt -X POST http://localhost:3000/api/admin/login \
   -d '{"pin":"TU_PIN","code":"123456"}'
 
 # 2) A partir de aquí, usa la cookie (-b cookies.txt) en las rutas de admin.
-#    La jornada la carga sola el cron; para forzarla en local, invoca el cron:
-curl http://localhost:3000/api/cron/jornada
+#    La jornada la carga sola el cron; para cargarla ya (como el botón del panel):
+curl -b cookies.txt -X POST http://localhost:3000/api/admin/jornada
+# → { "accion": "crear", "jornada": "Jornada 14 - 2027" }
+#    (con `npm run dev` y sin CRON_SECRET también vale: curl http://localhost:3000/api/cron/jornada)
 
 # Crear una invitación para el partido 3 (doble)
 curl -b cookies.txt -X POST http://localhost:3000/api/invitaciones \
@@ -620,7 +637,8 @@ curl -L http://localhost:3000/api/quiniela/pdf -o boleto.pdf
 Ver [`prisma/schema.prisma`](prisma/schema.prisma). Resumen:
 
 - **Quiniela**: `jornada`, `fechaCierre?`, `estado` (`ABIERTA`/`CERRADA`/`CADUCADA`),
-  `origen` (`AUTOMATICO`/`MANUAL`), `createdAt`.
+  `origen` (`AUTOMATICO`; `MANUAL` queda en el esquema pero ya no se usa),
+  `createdAt`.
 - **Partido**: `quinielaId`, `numero` (1–15), `local`, `visitante`,
   `multiplicidad?` (nula hasta que haya invitación), `esPleno`. Único
   `(quinielaId, numero)`.
@@ -654,18 +672,19 @@ las apuestas de una misma Quiniela: sin él, dos apuestas finales simultáneas
 quiniporra/
 ├── prisma/
 │   ├── schema.prisma
-│   └── migrations/                # migración inicial lista para migrate deploy
+│   └── migrations/                # migraciones listas para migrate deploy
 ├── scripts/
 │   └── fetch-jornada.ts           # npm run fetch:jornada
 ├── src/
 │   ├── middleware.ts             # CSP con nonce por petición
 │   ├── app/
 │   │   ├── page.tsx               # home pública
-│   │   ├── admin/page.tsx         # panel de administración (PIN)
+│   │   ├── admin/page.tsx         # panel de administración (PIN + 2FA)
 │   │   ├── apostar/[token]/page.tsx
 │   │   └── api/…                  # route handlers
 │   ├── components/                # FilaPartido, CasillasSignos, Escudo, Select, Toast…
 │   └── lib/
+│       ├── cargaJornada.ts        # decide crear/reemplazar/omitir (cron y botón del panel)
 │       ├── jornadaFetcher.ts      # orquesta Mundo Deportivo (primario) + SELAE (respaldo)
 │       ├── mundoDeportivo.ts      # scraper del boleto vigente (15 partidos + cabecera)
 │       └── …                      # prisma, auth, validation, tokens, cache, quiniela, pdf, http, errors
