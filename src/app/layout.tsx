@@ -12,6 +12,12 @@ export const viewport: Viewport = {
   themeColor: '#04100a',
 };
 
+// Todas las páginas se renderizan por petición: la CSP con nonce (middleware)
+// exige que Next inyecte el nonce en cada <script>. Una página prerenderizada
+// (p. ej. /admin, que es 'use client') saldría sin nonce y el navegador
+// bloquearía sus scripts.
+export const dynamic = 'force-dynamic';
+
 export default function RootLayout({
   children,
 }: {

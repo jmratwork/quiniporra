@@ -9,8 +9,9 @@ import { NextRequest, NextResponse } from 'next/server';
  * ejecutan scripts con ese nonce (o cargados por uno que lo tenga), lo que
  * cierra la vía de XSS por `<script>` inyectado que dejaba abierta la CSP anterior.
  *
- * Las páginas se renderizan de forma dinámica (`dynamic = 'force-dynamic'`), así
- * que el nonce es único por petición (nunca se cachea uno reutilizable).
+ * Las páginas se renderizan de forma dinámica (`dynamic = 'force-dynamic'` en el
+ * layout raíz), así que el nonce es único por petición (nunca se cachea uno
+ * reutilizable).
  */
 
 const esProduccion = process.env.NODE_ENV === 'production';
