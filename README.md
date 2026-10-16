@@ -25,8 +25,9 @@ pero con el stack actual.
 > **Notas de Next 15** (respecto a 14): en los route handlers y páginas
 > dinámicas `params` es asíncrono (se usa `await params` en `/apostar/[token]`
 > y en `/api/invitaciones/[token]`); `fetch` ya no cachea por defecto (la
-> petición a SELAE usa `cache: 'no-store'` y las vistas de estado usan
-> `dynamic = 'force-dynamic'`).
+> petición a SELAE usa `cache: 'no-store'`) y **todas las páginas se renderizan
+> por petición** (`dynamic = 'force-dynamic'` en el layout raíz), algo que exige
+> la CSP con *nonce* (ver [Cabeceras de seguridad y CSP](#seguridad-del-panel-doble-factor-2fa)).
 
 ---
 
@@ -96,11 +97,19 @@ cp .env.example .env
 | Variable            | Descripción                                                                     |
 | ------------------- | ------------------------------------------------------------------------------- |
 | `DATABASE_URL`      | Cadena de conexión a PostgreSQL.                                                |
-| `ADMIN_PIN`         | PIN del panel `/admin` (primer factor). **Mín. 12 caracteres en producción.**  |
-| `INVITACION_SECRET` | Secreto HMAC para firmar los tokens de invitación. **Oblig. en prod.**         |
-| `SESSION_SECRET`    | Secreto HMAC para firmar la cookie de sesión del admin. **Oblig. en prod.**    |
-| `TOTP_SECRET`       | Secreto base32 del segundo factor (2FA). **Oblig. en prod.** Ver más abajo.     |
-| `CRON_SECRET`       | Protege el cron de carga automática de la jornada. **Oblig. en prod.**          |
+| `ADMIN_PIN`         | PIN del panel `/admin` (primer factor). **Mín. 12 caracteres.** \*             |
+| `INVITACION_SECRET` | Secreto HMAC para firmar los tokens de invitación. **Oblig., mín. 32.** \*     |
+| `SESSION_SECRET`    | Secreto HMAC para firmar la cookie de sesión del admin. **Oblig., mín. 32.** \* |
+| `TOTP_SECRET`       | Secreto base32 del segundo factor (2FA). **Oblig., mín. 26.** \* Ver más abajo. |
+| `CRON_SECRET`       | Protege el cron de carga automática de la jornada. **Oblig., mín. 32.** \*     |
+
+\* **Solo `npm run dev`** (`NODE_ENV=development`) es permisivo: sin
+`INVITACION_SECRET`/`SESSION_SECRET` usa valores por defecto, sin `TOTP_SECRET`
+omite el segundo factor, sin `CRON_SECRET` deja llamar al cron y no exige la
+longitud mínima del PIN. **Cualquier otro entorno** (producción, previews de
+Vercel, `npm run start` en local, los tests o un despliegue sin `NODE_ENV`)
+exige todas las variables con su longitud mínima y, si falta alguna, falla en
+vez de arrancar con valores inseguros.
 
 #### Cómo generar cada secreto
 
@@ -158,7 +167,7 @@ Verás tres cosas:
 2. El valor **`TOTP_SECRET="…"`** (base32) → cópialo a la variable de entorno
    (`.env` en local, *Environment Variables* en Vercel). El script genera uno de
    **160 bits** (32 caracteres); si lo pones a mano, debe tener **≥26 caracteres
-   base32 (≥128 bits)** o el servidor lo rechaza en producción.
+   base32 (≥128 bits)** o el servidor lo rechaza (salvo en `npm run dev`).
 3. Un **código de 6 dígitos** que imprime el propio script.
 
 **Cómo funciona el segundo factor (y por qué importa el paso 3).** Un código
@@ -191,14 +200,14 @@ la vez.
 > Si generas un `TOTP_SECRET` nuevo (rotación) y no vuelves a escanearlo en la
 > app, los códigos dejarán de coincidir y no podrás entrar.
 >
-> En **desarrollo**, si dejas `TOTP_SECRET` vacío, se **omite** el segundo
-> factor (solo se pide el PIN) para no bloquear el arranque local. En
-> **producción** es obligatorio.
+> Solo en **desarrollo** (`npm run dev`), si dejas `TOTP_SECRET` vacío, se
+> **omite** el segundo factor (solo se pide el PIN) para no bloquear el arranque
+> local. En **cualquier otro entorno** es obligatorio.
 
 Más detalle en [Seguridad del panel: doble factor (2FA)](#seguridad-del-panel-doble-factor-2fa).
 
-> ⚠️ **No subas estos valores al repositorio.** Van en `.env` (ignorado por git)
-> en local y en las *Environment Variables* de Vercel en producción. Si crees
+> ⚠️ **No subas estos valores al repositorio.** Van en `.env` en local (git
+> ignora cualquier `.env*` salvo la plantilla `.env.example`) y en las *Environment Variables* de Vercel en producción. Si crees
 > que un secreto se ha filtrado, genera uno nuevo y actualízalo en todos los
 > entornos (rotar `TOTP_SECRET` obliga a volver a escanear el QR).
 
@@ -252,7 +261,9 @@ Luego aplica las migraciones: `npx prisma migrate deploy`.
 1. Sube el repositorio a GitHub y **importa el proyecto en Vercel**.
 2. Crea/enlaza una base de datos PostgreSQL y define las variables de entorno en
    Vercel: `DATABASE_URL`, `ADMIN_PIN` (≥ 12 caracteres), `INVITACION_SECRET`,
-   `SESSION_SECRET` y `TOTP_SECRET` (genera este último con `npm run totp:setup`).
+   `SESSION_SECRET`, `CRON_SECRET` y `TOTP_SECRET` (genera este último con
+   `npm run totp:setup`). Sin cualquiera de ellas, la parte de la app que la
+   usa responde con error.
 3. Vercel usará automáticamente el script **`vercel-build`**:
 
    ```
@@ -281,7 +292,11 @@ Luego aplica las migraciones: `npx prisma migrate deploy`.
    estado (`PENDIENTE`/`APOSTADO`), signos apostados, nombre del apostante y las
    invitaciones emitidas con su estado (`pendiente`, `usada`, `anulada`).
 4. **PDF del boleto** — cuando la Quiniela pasa a `CERRADA`, aparece un botón
-   con icono de impresora que descarga el boleto completo en PDF.
+   con icono de impresora que descarga el boleto completo en PDF. Los
+   caracteres que la fuente del PDF no admite (`Ł`, `ș`, emoji…) se cambian por
+   su letra base (`L`, `s`) o por `?`, en vez de hacer fallar la descarga.
+5. **Invitaciones solo en plazo** — no se pueden crear con la Quiniela
+   `CERRADA`, `CADUCADA` o pasada su fecha de cierre (409).
 
 ### Jugador (enlace `/apostar/[token]`)
 
@@ -477,11 +492,11 @@ _La jornada mostrada varía cada semana; este es un volcado real a modo de ejemp
 | Método   | Ruta                        | Descripción                                                                 | Auth      |
 | -------- | --------------------------- | --------------------------------------------------------------------------- | --------- |
 | `POST`   | `/api/admin/login`          | Doble factor: `{ pin, code }` → emite la cookie de sesión. **429** si abusa. | 2FA       |
-| `POST`   | `/api/admin/logout`         | Cierra la sesión (borra la cookie).                                         | —         |
+| `POST`   | `/api/admin/logout`         | Cierra la sesión (revoca y borra la cookie). **500** si no puede revocar.   | —         |
 | `GET`    | `/api/admin/session`        | `{ autenticado, totpRequerido }` para la pantalla de login.                | —         |
 | `GET`    | `/api/quiniela`             | Estado completo. Sin sesión → vista pública; con sesión → vista admin.     | parcial   |
 | `DELETE` | `/api/quiniela`             | Reinicia todo: archiva y borra la Quiniela activa (en cascada).             | sesión    |
-| `POST`   | `/api/invitaciones`         | Crea invitación (partido, nombre, multiplicidad). Devuelve el token 1 vez.  | sesión    |
+| `POST`   | `/api/invitaciones`         | Crea invitación (partido, nombre, multiplicidad). Devuelve el token 1 vez. **409** si cerrada/caducada. | sesión    |
 | `DELETE` | `/api/admin/invitaciones/[id]` | Anula una invitación PENDIENTE (409 si ya fue usada).                    | sesión    |
 | `GET`    | `/api/invitaciones/[token]` | Datos para la pantalla del jugador. **409** si ya apostado o fuera de plazo. | token     |
 | `POST`   | `/api/apuestas`             | Registra la apuesta. **400** multiplicidad; **409** tarde/caducada; **429**. | token     |
@@ -521,12 +536,19 @@ para no permitir fuerza bruta distribuida entre instancias); el anti-replay del
 TOTP y la revocación de sesiones son *fail-open* (bajo impacto: solo dejarían
 reenviar el mismo código, o una revocación caduca sola en ≤8 h). El rate-limit
 compartido en Postgres cubre **también los endpoints públicos** (apuestas y
-consulta de invitación), no solo el login.
+consulta de invitación), no solo el login. La IP de cada petición sale de las
+cabeceras que fija Vercel (`x-vercel-forwarded-for`, `x-real-ip`); en Vercel
+nunca se usa `x-forwarded-for`, porque la puede escribir el cliente para
+cambiar de "IP" en cada intento.
 
 **Cabeceras de seguridad y CSP.** Todas las respuestas llevan una
 **Content-Security-Policy con *nonce* por petición** ([`src/middleware.ts`](src/middleware.ts)):
 `script-src` usa `'nonce-…' 'strict-dynamic'` en lugar de `'unsafe-inline'`, así
-que un `<script>` inyectado no llega a ejecutarse. El resto de cabeceras
+que un `<script>` inyectado no llega a ejecutarse. Por eso **todas las páginas
+se renderizan por petición** (`dynamic = 'force-dynamic'` en
+[`src/app/layout.tsx`](src/app/layout.tsx)): una página prerenderizada en el
+build (como `/admin`, que es un componente cliente) saldría sin *nonce* y el
+navegador bloquearía todos sus scripts. El resto de cabeceras
 (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`,
 `Permissions-Policy` y HSTS en producción) se aplican desde `next.config.mjs`.
 
@@ -537,9 +559,9 @@ npm run totp:setup     # escanea el QR con tu app y copia el TOTP_SECRET
 ```
 
 Pon el `TOTP_SECRET` en `.env` (local) y en las variables de entorno de Vercel
-(producción). En **desarrollo**, si `TOTP_SECRET` está vacío, se **omite** el
-segundo factor (solo se pide el PIN) para no bloquear el arranque; en
-**producción** es obligatorio.
+(producción). Solo en **desarrollo** (`npm run dev`), si `TOTP_SECRET` está
+vacío, se **omite** el segundo factor (solo se pide el PIN) para no bloquear el
+arranque; en **cualquier otro entorno** es obligatorio.
 
 ### Ejemplos (`curl`)
 
@@ -579,7 +601,7 @@ curl -L http://localhost:3000/api/quiniela/pdf -o boleto.pdf
 
 Ver [`prisma/schema.prisma`](prisma/schema.prisma). Resumen:
 
-- **Quiniela**: `jornada`, `fechaCierre?`, `estado` (`ABIERTA`/`CERRADA`),
+- **Quiniela**: `jornada`, `fechaCierre?`, `estado` (`ABIERTA`/`CERRADA`/`CADUCADA`),
   `origen` (`AUTOMATICO`/`MANUAL`), `createdAt`.
 - **Partido**: `quinielaId`, `numero` (1–15), `local`, `visitante`,
   `multiplicidad?` (nula hasta que haya invitación), `esPleno`. Único
@@ -599,9 +621,12 @@ Los **signos** se modelan de forma tipada (JSON validado):
 ### Transacciones
 
 El registro de una apuesta se hace en **una transacción de Prisma** que:
-crea la apuesta → marca la invitación como `USADA` → **cierra la Quiniela si es
-la 15.ª apuesta**. Si dos jugadores intentan el mismo partido a la vez, la
-restricción única hace que el segundo reciba **409** ("llegas tarde").
+bloquea la fila de la Quiniela (`SELECT … FOR UPDATE`) → crea la apuesta →
+marca la invitación como `USADA` → **cierra la Quiniela si es la 15.ª
+apuesta**. Si dos jugadores intentan el mismo partido a la vez, la restricción
+única hace que el segundo reciba **409** ("llegas tarde"). El bloqueo serializa
+las apuestas de una misma Quiniela: sin él, dos apuestas finales simultáneas
+(a partidos distintos) contarían 14 cada una y ninguna la cerraría.
 
 ---
 
@@ -626,6 +651,7 @@ quiniporra/
 │       ├── jornadaFetcher.ts      # orquesta Mundo Deportivo (primario) + SELAE (respaldo)
 │       ├── mundoDeportivo.ts      # scraper del boleto vigente (15 partidos + cabecera)
 │       └── …                      # prisma, auth, validation, tokens, cache, quiniela, pdf, http, errors
+├── tests/                         # Vitest: login/logout, cron, PDF, fetcher, validación, tokens…
 ├── .env.example
 └── package.json
 ```
@@ -642,6 +668,8 @@ quiniporra/
 | `npm run db:studio`      | Abre Prisma Studio.                                            |
 | `npm run fetch:jornada`  | Prueba real del fetcher de la jornada.                        |
 | `npm run totp:setup`     | Genera el secreto y el QR del doble factor (2FA).             |
+| `npm test`               | Ejecuta los tests (Vitest), sin base de datos ni red.         |
+| `npm run test:watch`     | Tests en modo *watch*.                                        |
 
 ## Nota
 
