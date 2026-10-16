@@ -10,9 +10,9 @@
 # producción
 /build
 
-# entorno
-.env
-.env*.local
+# entorno: cualquier .env (.env, .env.local, .env.production…) salvo la plantilla
+.env*
+!.env.example
 
 # depuración
 npm-debug.log*
