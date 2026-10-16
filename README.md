@@ -8,6 +8,10 @@ a apostar un partido concreto mediante un enlace único, y gana **quien apueste
 primero** cada partido. Cuando los 15 partidos están apostados, la porra se
 cierra y se puede descargar el boleto completo en **PDF**.
 
+<p align="center">
+  <img src="demo.webp" width="440" alt="Demo de quiniporra: carga de la jornada, invitación, apuesta, cierre y PDF del boleto">
+</p>
+
 Inspirado en la arquitectura de
 [jmratwork/porrafutbol](https://github.com/jmratwork/porrafutbol) (Next.js 14),
 pero con el stack actual.
