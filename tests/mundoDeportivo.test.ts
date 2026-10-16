@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  anyoMinimoTemporada,
   parseaBoleto,
   htmlALineas,
   limpiaNombreEquipo,
@@ -133,5 +134,23 @@ describe('pareceUnPartido / posicionEnMismaLinea', () => {
   it('extrae la posición cuando va en la misma línea', () => {
     expect(posicionEnMismaLinea('15 Real Madrid - Barcelona')[0]).toBe(15);
     expect(posicionEnMismaLinea('Real Madrid - Barcelona 7')[0]).toBe(7);
+  });
+});
+
+describe('anyoMinimoTemporada', () => {
+  const t = (iso: string) => anyoMinimoTemporada(new Date(iso).getTime());
+
+  it('la temporada se etiqueta con el año en que termina', () => {
+    expect(t('2026-10-16T12:00:00Z')).toBe(2027); // octubre -> temporada 2027
+    expect(t('2027-03-10T12:00:00Z')).toBe(2027);
+  });
+
+  it('agosto admite la temporada que acaba y la nueva', () => {
+    expect(t('2026-08-20T12:00:00Z')).toBe(2026);
+  });
+
+  it('usa la fecha de Madrid en los cambios de mes y de año', () => {
+    expect(t('2026-08-31T22:30:00Z')).toBe(2027); // ya es 1 de septiembre en Madrid
+    expect(t('2026-12-31T22:30:00Z')).toBe(2027); // ya es 1 de enero de 2027 en Madrid
   });
 });

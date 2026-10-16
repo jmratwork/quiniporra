@@ -27,8 +27,9 @@ export { aIso };
  *     responde: por eso solo se consulta cuando Mundo Deportivo no trajo los
  *     partidos o el número de jornada, nunca en el camino normal.
  *
- * Si nada funciona se lanza JornadaFetchError y el panel de admin ofrece el
- * FALLBACK MANUAL. La app nunca depende en exclusiva de una fuente externa.
+ * Si nada funciona se lanza JornadaFetchError: el cron la reintenta en su
+ * siguiente disparo y el admin puede reintentarla desde el panel ("Cargar
+ * jornada"). No hay carga manual de los 15 partidos.
  *
  * Todas las peticiones se hacen en servidor, nunca desde el navegador.
  */
@@ -449,8 +450,8 @@ async function partidosDesdeSelae(cab: CabeceraSorteo): Promise<PartidoJornada[]
 
 /**
  * Obtiene la jornada actual (la próxima abierta a apuestas) con sus 15 partidos.
- * Lanza JornadaFetchError si ninguna fuente responde: entonces toca el
- * formulario manual del panel de admin.
+ * Lanza JornadaFetchError si ninguna fuente responde (se reintenta en el
+ * siguiente disparo del cron o desde el panel).
  */
 export async function obtenerJornadaActual(
   opts: { usarCache?: boolean } = {},
@@ -518,7 +519,7 @@ export async function obtenerJornadaActual(
   if (!partidos) {
     throw new JornadaFetchError(
       'No se pudieron obtener los 15 partidos de la jornada.',
-      `${errores.join(' | ')}. Usa el formulario manual del panel de administración.`,
+      `${errores.join(' | ')}.`,
     );
   }
 
@@ -530,7 +531,7 @@ export async function obtenerJornadaActual(
     throw new JornadaFetchError(
       'No se pudo determinar el número de jornada.',
       `${errores.join(' | ') || 'sin detalles'}. ` +
-        'Reintentable en el siguiente disparo del cron; si persiste, usa el formulario manual.',
+        'Reintentable en el siguiente disparo del cron o desde el panel ("Cargar jornada").',
     );
   }
   if (fechaCierre === null) {

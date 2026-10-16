@@ -3,15 +3,14 @@
  *
  *   npm run fetch:jornada
  *
- * Hace una petición REAL a los endpoints de SELAE:
+ * Hace peticiones REALES a Mundo Deportivo (y a SELAE solo de respaldo):
  *   1. Intenta obtener la jornada ABIERTA a apuestas con sus 15 partidos.
- *   2. Si sus partidos aún no están publicados (limitación real de SELAE:
- *      buscadorSorteos solo expone jornadas ya publicadas/celebradas),
- *      demuestra que el parser funciona mostrando los 15 partidos de la
- *      última jornada disponible.
+ *   2. Si no lo consigue, demuestra que el parser de SELAE funciona mostrando
+ *      los 15 partidos de la última jornada disponible (buscadorSorteos solo
+ *      expone jornadas ya publicadas/celebradas).
  *
- * Recuerda: en la app, si la carga automática falla, el panel /admin ofrece
- * el formulario manual para introducir los 15 partidos a mano.
+ * En la app, si la carga falla, el cron la reintenta en su siguiente disparo y
+ * el admin puede reintentarla desde el panel (botón "Cargar jornada").
  */
 import {
   obtenerJornadaActual,
@@ -91,9 +90,8 @@ async function main() {
       console.log('✅ 15 partidos reales obtenidos y parseados correctamente:\n');
       imprimeJornada(ultima);
       console.log(
-        '\n   El fetcher y el parser funcionan. Cuando SELAE publique los partidos\n' +
-          '   de la jornada abierta, el botón "Iniciar" los cargará automáticamente.\n' +
-          '   Mientras tanto, usa el formulario manual del panel /admin.',
+        '\n   El fetcher y el parser funcionan. La jornada abierta se cargará cuando la\n' +
+          '   fuente publique sus 15 partidos (cron, o botón "Cargar jornada" del panel).',
       );
       process.exit(0);
     } catch (e2) {
@@ -104,7 +102,7 @@ async function main() {
       );
       console.error(
         '\n   → La fuente externa no está accesible ahora mismo (posible bloqueo de\n' +
-          '     red/Akamai). Usa el fallback manual del panel /admin.',
+          '     red/Akamai). Vuelve a intentarlo más tarde.',
       );
       process.exit(1);
     }

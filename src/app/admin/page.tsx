@@ -58,6 +58,21 @@ interface HistoricoItem {
   archivadaEn: string;
 }
 
+// Qué contarle al admin según lo que haya decidido la carga (lib/cargaJornada.ts).
+const MENSAJE_CARGA: Record<string, (jornada: string) => MensajeToast> = {
+  crear: (j) => ({ tipo: 'exito', texto: `${j} cargada.` }),
+  reemplazar: (j) => ({ tipo: 'exito', texto: `Jornada anterior archivada; ${j} cargada.` }),
+  'sin-cambios': (j) => ({ tipo: 'info', texto: `${j} ya estaba cargada.` }),
+  'omitir-activa': (j) => ({
+    tipo: 'info',
+    texto: `La fuente publica ${j}, pero hay una porra abierta en plazo y no se ha tocado. Si la cargada es incorrecta, usa Reiniciar y vuelve a cargar.`,
+  }),
+  'omitir-antigua': (j) => ({
+    tipo: 'error',
+    texto: `La fuente publica ${j}, anterior a la cargada (posible página antigua). No se ha tocado; inténtalo más tarde.`,
+  }),
+};
+
 export default function AdminPage() {
   const [pin, setPin] = useState('');
   const [code, setCode] = useState('');
@@ -68,6 +83,7 @@ export default function AdminPage() {
   const [quiniela, setQuiniela] = useState<QuinielaAdmin | null>(null);
   const [historicos, setHistoricos] = useState<HistoricoItem[]>([]);
   const [cargando, setCargando] = useState(false);
+  const [cargandoJornada, setCargandoJornada] = useState(false);
   const [toast, setToast] = useState<MensajeToast | null>(null);
 
   // Carga el estado de la quiniela. La autenticación va por cookie de sesión
@@ -200,6 +216,27 @@ export default function AdminPage() {
   }
 
 
+  /** Carga la jornada ahora (sin esperar al cron) y cuenta qué ha pasado. */
+  async function cargarJornada() {
+    setCargandoJornada(true);
+    try {
+      const res = await fetch('/api/admin/jornada', { method: 'POST' });
+      if (res.status === 401) return sesionExpirada();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detalle = json.detalle ? ` (${String(json.detalle).slice(0, 160)})` : '';
+        setToast({ tipo: 'error', texto: `${json.error ?? 'No se pudo cargar la jornada.'}${detalle}` });
+        return;
+      }
+      setToast(MENSAJE_CARGA[json.accion]?.(json.jornada) ?? { tipo: 'info', texto: 'Carga terminada.' });
+      await cargar();
+    } catch {
+      setToast({ tipo: 'error', texto: 'No se pudo conectar con el servidor.' });
+    } finally {
+      setCargandoJornada(false);
+    }
+  }
+
   async function reiniciar() {
     if (!confirm('¿Borrar la Quiniela activa y todas sus apuestas?')) return;
     const res = await fetch('/api/quiniela', { method: 'DELETE' });
@@ -322,8 +359,11 @@ export default function AdminPage() {
             La jornada de La Quiniela se carga <strong>automáticamente</strong> los
             <strong> lunes</strong> (entresemana) y los <strong>viernes</strong> (fin de
             semana) a las <strong>10:00</strong> (hora de Barcelona). Aparecerá aquí y en
-            la página de inicio en cuanto se cargue.
+            la página de inicio en cuanto se cargue. Si no quieres esperar, cárgala ahora.
           </p>
+          <button onClick={cargarJornada} disabled={cargandoJornada} className="btn-primary">
+            {cargandoJornada ? 'Cargando…' : 'Cargar jornada ahora'}
+          </button>
         </section>
       ) : (
         <header className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-noche-700 to-noche-950 p-6 shadow-2xl">
@@ -364,6 +404,14 @@ export default function AdminPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {cerrada && <BotonImprimir />}
+              <button
+                onClick={cargarJornada}
+                disabled={cargandoJornada}
+                className="btn-ghost"
+                title="Consulta la fuente ahora, con las mismas reglas que la carga automática"
+              >
+                {cargandoJornada ? 'Cargando…' : 'Cargar jornada'}
+              </button>
               <button onClick={reiniciar} className="btn-danger">
                 Reiniciar
               </button>

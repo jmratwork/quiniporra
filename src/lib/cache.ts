@@ -1,10 +1,10 @@
 /**
  * Caché en memoria muy simple con expiración (TTL).
  *
- * Se usa para no repetir la petición externa a SELAE si el admin pulsa
- * "Iniciar" varias veces seguidas. En serverless la memoria no se comparte
- * entre instancias, pero sí evita ráfagas dentro de una misma instancia,
- * que es el caso que nos interesa.
+ * Se usa para no repetir la petición externa a la fuente de la jornada en
+ * llamadas seguidas (la carga desde el panel la salta a propósito). En
+ * serverless la memoria no se comparte entre instancias, pero sí evita ráfagas
+ * dentro de una misma instancia, que es el caso que nos interesa.
  */
 
 interface Entrada<T> {

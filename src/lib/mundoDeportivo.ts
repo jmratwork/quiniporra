@@ -1,6 +1,6 @@
 import { JornadaFetchError } from './errors';
 import { fetchTextoExterno } from './fetchExterno';
-import { fechaCierreDesdeDiaSemana } from './fechas';
+import { enMadridPartes, fechaCierreDesdeDiaSemana } from './fechas';
 
 /**
  * Obtención de los 15 partidos del boleto VIGENTE de La Quiniela desde la
@@ -319,6 +319,18 @@ export interface BoletoMundoDeportivo extends CabeceraBoleto {
 }
 
 /**
+ * Año mínimo admisible en la etiqueta del boleto ("Jornada 14" + "2027").
+ * SELAE etiqueta cada temporada con el año en que TERMINA: de agosto de 2026 a
+ * julio de 2027 la vigente es la "2027". De septiembre a diciembre se exige el
+ * año siguiente; de enero a agosto, el año en curso (agosto admite ambos porque
+ * la temporada nueva arranca a mitad de mes).
+ */
+export function anyoMinimoTemporada(ahoraMs: number = Date.now()): number {
+  const { anio, mes } = enMadridPartes(ahoraMs);
+  return mes >= 9 ? anio + 1 : anio;
+}
+
+/**
  * Descarga el boleto vigente de Mundo Deportivo y devuelve la cabecera (número
  * de jornada, año, fecha de cierre) junto con los 15 partidos. Mundo Deportivo
  * es accesible desde Vercel (a diferencia de SELAE, bloqueado por Akamai).
@@ -327,12 +339,16 @@ export interface BoletoMundoDeportivo extends CabeceraBoleto {
 export async function obtenerBoletoMundoDeportivo(
   timeoutMs = 25_000,
 ): Promise<BoletoMundoDeportivo> {
-  const res = await fetchTextoExterno(MUNDO_DEPORTIVO_QUINIELA_URL, {
+  // Parámetro único + no-cache: que ninguna caché intermedia (CDN) devuelva
+  // una versión antigua de la página.
+  const res = await fetchTextoExterno(`${MUNDO_DEPORTIVO_QUINIELA_URL}?_=${Date.now()}`, {
     headers: {
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'es-ES,es;q=0.9',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
     },
     timeoutMs,
   });
@@ -352,8 +368,8 @@ export async function obtenerBoletoMundoDeportivo(
     throw new JornadaFetchError(
       `Se esperaban ${TOTAL} partidos y se encontraron ${partidos.length}.`,
       partidos.length === 14
-        ? 'La página no publica todavía el Pleno al 15. Usa el formulario manual.'
-        : 'La estructura de la página puede haber cambiado. Usa el formulario manual.',
+        ? 'La página no publica todavía el Pleno al 15. Vuelve a intentarlo más tarde.'
+        : 'La estructura de la página puede haber cambiado.',
     );
   }
 
@@ -370,6 +386,17 @@ export async function obtenerBoletoMundoDeportivo(
     `[mundoDeportivo] cabecera: jornada=${cabecera.numeroJornada}, anyo=${cabecera.anyo}, ` +
       `cierre=${cabecera.fechaCierre ?? 'null'}`,
   );
+
+  // Un boleto de una temporada anterior es una página vieja (p. ej. servida
+  // desde una caché intermedia): mejor fallar y reintentar que cargarlo. Su
+  // fecha de cierre no lo delataría, porque se infiere del día de la semana.
+  const minimo = anyoMinimoTemporada();
+  if (cabecera.anyo !== null && Number(cabecera.anyo) < minimo) {
+    throw new JornadaFetchError(
+      `Mundo Deportivo publica un boleto de una temporada anterior (${cabecera.anyo}).`,
+      `Se esperaba la temporada ${minimo} o posterior; posible página antigua en caché. Vuelve a intentarlo más tarde.`,
+    );
+  }
 
   return { ...cabecera, partidos };
 }

@@ -1,8 +1,9 @@
 # quiniporra 🎯
 
 Aplicación Web para organizar una **porra colaborativa** alrededor de la
-**jornada actual de La Quiniela española**. El administrador carga la jornada
-(automáticamente desde la Web oficial de SELAE o a mano), invita a cada jugador
+**jornada actual de La Quiniela española**. La jornada se carga sola
+(desde Mundo Deportivo, con SELAE de respaldo) o al momento desde el panel; el
+administrador invita a cada jugador
 a apostar un partido concreto mediante un enlace único, y gana **quien apueste
 primero** cada partido. Cuando los 15 partidos están apostados, la porra se
 cierra y se puede descargar el boleto completo en **PDF**.
@@ -279,10 +280,12 @@ Luego aplica las migraciones: `npx prisma migrate deploy`.
 
 ### Administrador (`/admin`, protegido por PIN + 2FA)
 
-1. **La jornada se carga sola** — no hay botón de "Iniciar": la jornada actual
-   se carga **automáticamente** (ver [Carga programada](#carga-programada-de-la-jornada))
-   y aparece tanto en el panel como en la página de inicio pública. Cuando aún
-   no hay jornada, el panel lo indica.
+1. **La jornada se carga sola** — la jornada actual se carga
+   **automáticamente** (ver [Carga programada](#carga-programada-de-la-jornada))
+   y aparece tanto en el panel como en la página de inicio pública. Si no quieres
+   esperar al cron, el botón **Cargar jornada** la consulta al momento, con las
+   mismas reglas (no toca una porra abierta en plazo). Para cambiar una jornada
+   cargada por error: **Reiniciar** (la archiva) y luego **Cargar jornada**.
 2. **Invitar a apostar** — para un partido, genera una invitación con el nombre
    del jugador y la **multiplicidad**. Se obtiene un **enlace único con token**
    que el admin copia y envía por su cuenta (WhatsApp, email…). _La app no envía
@@ -420,6 +423,9 @@ destructiva** (`src/lib/cargaJornada.ts`):
 
 - Si no hay jornada → la crea.
 - Si ya está cargada la misma jornada → no hace nada.
+- Si la fuente publica una jornada **anterior** a la cargada (menor número, o
+  de una temporada anterior) → **no la toca**: solo puede ser una página vieja,
+  y nunca se retrocede.
 - Si la jornada anterior ya terminó (`CERRADA`/`CADUCADA` o pasada su
   `fechaCierre`) → la **archiva** (ver abajo) y la reemplaza por la nueva.
 - Si hay una porra **ABIERTA en curso** (distinta jornada, aún en plazo) → **no
@@ -433,6 +439,10 @@ reemplace una jornada `CERRADA` antes de que nadie descargue su boleto, queda
 consultable desde el panel de admin (**Boletos anteriores**) y se puede
 regenerar su PDF en `/api/admin/historico/[id]/pdf`. Aplica también al botón
 **Reiniciar** del panel (`DELETE /api/quiniela`), que archiva antes de borrar.
+
+La misma carga se puede pedir desde el panel con el botón **Cargar jornada**
+(`POST /api/admin/jornada`, requiere sesión de admin, máx. 6 cada 10 min). Esa
+carga no usa la caché de 10 minutos: siempre consulta la fuente.
 
 El endpoint está protegido con `CRON_SECRET` (Vercel envía
 `Authorization: Bearer <CRON_SECRET>`). **Zona horaria:** Vercel programa los
@@ -455,9 +465,16 @@ desfase es inocuo. Ajusta `vercel.json` si quieres exactitud todo el año.
   recibe 403. Desde IPs de datacenter (p. ej. Vercel) puede variar. Como la
   cabecera de SELAE es **best-effort**, si falla se sigue adelante con los
   partidos de Mundo Deportivo.
-- La carga es **solo automática** (cron): no hay carga ni formulario manual en el
-  panel. Si ambas fuentes fallasen a la vez, la jornada no se carga hasta el
-  siguiente disparo del cron con la fuente ya restablecida.
+- Se ha visto a Mundo Deportivo servir **una vez** un boleto antiguo (otra
+  temporada) y, minutos después, el correcto. Por eso la petición lleva un
+  parámetro único y `Cache-Control: no-cache` (que ninguna caché intermedia
+  devuelva una versión vieja), y se **rechaza** cualquier boleto de una
+  temporada anterior a la vigente (SELAE etiqueta la temporada con el año en
+  que termina: en octubre de 2026 la vigente es la "2027"). Su fecha de cierre
+  no lo delataría, porque se infiere del día de la semana.
+- **No hay formulario para escribir los 15 partidos a mano**: tanto el cron como
+  el botón **Cargar jornada** dependen de las fuentes. Si ambas fallasen a la
+  vez, no se puede cargar la jornada hasta que la fuente se restablezca.
 
 ### Ejemplo real de `npm run fetch:jornada`
 
@@ -502,6 +519,7 @@ _La jornada mostrada varía cada semana; este es un volcado real a modo de ejemp
 | `POST`   | `/api/apuestas`             | Registra la apuesta. **400** multiplicidad; **409** tarde/caducada; **429**. | token     |
 | `GET`    | `/api/quiniela/pdf`         | PDF del boleto (solo si `CERRADA`; **409** si no).                          | ninguna   |
 | `GET`    | `/api/cron/jornada`         | Carga automática de la jornada (idempotente, no destructiva). **502** si falla la fuente. | cron      |
+| `POST`   | `/api/admin/jornada`        | Carga la jornada al momento (mismas reglas, sin caché). **502** si falla la fuente; **429** si abusa. | sesión    |
 | `GET`    | `/api/admin/historico`      | Lista los boletos de jornadas anteriores archivadas.                        | sesión    |
 | `GET`    | `/api/admin/historico/[id]/pdf` | PDF de un boleto archivado (regenerado desde su snapshot).              | sesión    |
 
