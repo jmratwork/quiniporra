@@ -11,7 +11,12 @@ import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
  * accesible desde JavaScript ni viaja en peticiones de terceros.
  */
 
-export const COOKIE_SESION = 'quiniporra_admin';
+// En producción, prefijo `__Host-`: el navegador solo acepta la cookie si es
+// Secure, con Path=/ y sin Domain, así que ni un subdominio ni una página HTTP
+// pueden plantarla o sobrescribirla. En desarrollo (http://localhost) va sin
+// prefijo, porque algunos navegadores no aceptan cookies Secure por HTTP.
+export const COOKIE_SESION =
+  process.env.NODE_ENV === 'production' ? '__Host-quiniporra_admin' : 'quiniporra_admin';
 export const TTL_SESION_MS = 8 * 60 * 60 * 1000; // 8 horas
 
 // Longitud mínima en producción (alineada con randomBytes(32) del .env.example).

@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'crypto';
 import { NextRequest } from 'next/server';
 import { COOKIE_SESION, leerToken } from './session';
 import { sesionRevocada, revocarJti } from './authStore';
@@ -46,14 +47,15 @@ function pinConfigurado(): string {
   return pin;
 }
 
-/** Comparación en tiempo constante para evitar ataques de temporización. */
+/**
+ * Comparación en tiempo constante para evitar ataques de temporización. Se
+ * comparan los SHA-256 (siempre 32 bytes), así que el tiempo tampoco depende
+ * de la longitud y no se filtra la del PIN.
+ */
 function comparaSeguro(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let resultado = 0;
-  for (let i = 0; i < a.length; i++) {
-    resultado |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return resultado === 0;
+  const ha = createHash('sha256').update(a, 'utf8').digest();
+  const hb = createHash('sha256').update(b, 'utf8').digest();
+  return timingSafeEqual(ha, hb);
 }
 
 /** Primer factor: ¿el PIN recibido es correcto? (usado solo en el login) */

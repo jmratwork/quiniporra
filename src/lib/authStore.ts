@@ -14,6 +14,8 @@ import { rateLimit as rateLimitMemoria } from './rateLimit';
  *  - `pasoTotpYaUsado` / `sesionRevocada`: **fail-open** (bajo impacto: el
  *    anti-replay solo dejaría reenviar el MISMO código, no probar nuevos; y una
  *    revocación no aplicada caduca sola en ≤8 h).
+ *  - `revocarJti`: **lanza** el error, para que el logout avise de que la
+ *    sesión no se ha podido revocar en vez de responder un falso ok.
  */
 
 // ---------------------------------------------------------------------------
@@ -124,17 +126,20 @@ export async function sesionRevocada(jti: string): Promise<boolean> {
   }
 }
 
-/** Revoca un jti hasta su expiración natural, y poda las entradas caducadas. */
+/**
+ * Revoca un jti hasta su expiración natural, y poda las entradas caducadas.
+ * Lanza si no se puede guardar la revocación; la poda es best-effort.
+ */
 export async function revocarJti(jti: string, expiraEn: Date): Promise<void> {
+  await prisma.sesionRevocada.upsert({
+    where: { jti },
+    create: { jti, expiraEn },
+    update: {},
+  });
   try {
-    await prisma.sesionRevocada.upsert({
-      where: { jti },
-      create: { jti, expiraEn },
-      update: {},
-    });
     await prisma.sesionRevocada.deleteMany({ where: { expiraEn: { lt: new Date() } } });
   } catch (e) {
-    console.warn('[authStore] no se pudo revocar la sesión:', e);
+    console.warn('[authStore] no se pudo podar sesiones revocadas caducadas:', e);
   }
 }
 

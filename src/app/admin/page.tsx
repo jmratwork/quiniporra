@@ -157,11 +157,18 @@ export default function AdminPage() {
 
       if (!res.ok) {
         setToast({ tipo: 'error', texto: json.error ?? 'No se pudo iniciar sesión.' });
-        if (pasoLogin === 'codigo') setCode('');
+        if (pasoLogin === 'codigo') {
+          // 401 en el paso 2: el servidor no dice si falló el PIN o el código,
+          // así que se vuelve a empezar por el PIN. Otros errores (429, 503…)
+          // solo limpian el código.
+          if (res.status === 401) reiniciarLogin();
+          else setCode('');
+        }
         return;
       }
 
-      // PIN correcto pero falta el segundo factor -> pasamos al paso del código.
+      // Falta el segundo factor -> pasamos al paso del código (el PIN se
+      // comprueba en el servidor junto con el código, en el paso 2).
       if (json.requiereCodigo) {
         setPasoLogin('codigo');
         return;
@@ -179,10 +186,17 @@ export default function AdminPage() {
   }
 
   async function salir() {
-    await fetch('/api/admin/logout', { method: 'POST' }).catch(() => {});
+    const res = await fetch('/api/admin/logout', { method: 'POST' }).catch(() => null);
     setAutenticado(false);
     setQuiniela(null);
     reiniciarLogin();
+    if (!res?.ok) {
+      const json = await res?.json().catch(() => ({}));
+      setToast({
+        tipo: 'error',
+        texto: json?.error ?? 'No se pudo cerrar la sesión en el servidor.',
+      });
+    }
   }
 
 
@@ -207,7 +221,7 @@ export default function AdminPage() {
     );
   }
 
-  // --- Login en dos pasos: 1) PIN, 2) código TOTP (solo si el PIN es correcto) ---
+  // --- Login en dos pasos: 1) PIN, 2) código TOTP (el servidor comprueba ambos en el paso 2) ---
   if (!autenticado) {
     const enPaso1 = pasoLogin === 'pin';
     return (
@@ -219,7 +233,7 @@ export default function AdminPage() {
             <p className="mt-1 text-sm text-slate-400">
               {enPaso1
                 ? 'Introduce el PIN para continuar.'
-                : 'PIN correcto. Ahora el código de tu app de autenticación.'}
+                : 'Ahora el código de tu app de autenticación.'}
             </p>
           </div>
 

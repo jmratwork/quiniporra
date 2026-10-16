@@ -499,11 +499,14 @@ El acceso a `/admin` exige **dos factores**:
    Authenticator, Authy, 1Password…) — *algo que tienes*, con `TOTP_SECRET`.
 
 Al superar ambos en `POST /api/admin/login` se emite una **cookie de sesión
-firmada** (HMAC con `SESSION_SECRET`), `httpOnly` + `Secure` + `SameSite=Strict`,
-TTL de 8 h y con un **`jti`** aleatorio. Las demás rutas de admin ya **no reciben
-el PIN**: validan esa cookie (**401** si falta o caduca). El login está protegido
-con **rate limiting** por IP (5 intentos/10 min → **429**) y con **anti-replay**
-(un mismo código TOTP no se puede usar dos veces). El mensaje de error no revela
+firmada** (HMAC con `SESSION_SECRET`), `httpOnly` + `Secure` + `SameSite=Strict`
+(con prefijo `__Host-` en producción), TTL de 8 h y con un **`jti`** aleatorio.
+Las demás rutas de admin ya **no reciben el PIN**: validan esa cookie (**401** si
+falta o caduca). El login está protegido con **rate limiting** por IP (10
+peticiones/10 min) y global (30 peticiones/hora sumando todas las IP, contra la
+fuerza bruta distribuida) → **429**, y con **anti-replay** (un mismo código TOTP
+no se puede usar dos veces). El PIN y el código se comprueban **juntos** en el
+segundo paso: el primero nunca dice si el PIN es correcto, y el error no revela
 qué factor ha fallado.
 
 **Estado compartido entre instancias serverless.** El rate limiting, el
@@ -511,7 +514,8 @@ anti-replay del TOTP y la **revocación de sesiones** se guardan en Postgres
 (tablas `rate_limits`, `totp_step`, `sesiones_revocadas`), no en memoria, para
 que funcionen aunque Vercel reparta las peticiones entre varias instancias. El
 `logout` **revoca** el `jti` (la sesión deja de valer aunque el token esté en
-otro sitio). Ante un fallo de BD, cada comprobación decide su modo: el
+otro sitio); si no puede guardar la revocación responde **500**, aunque borra la
+cookie igualmente. Ante un fallo de BD, cada comprobación decide su modo: el
 **rate-limit del login es *fail-closed*** (rechaza con **503** reintentable,
 para no permitir fuerza bruta distribuida entre instancias); el anti-replay del
 TOTP y la revocación de sesiones son *fail-open* (bajo impacto: solo dejarían
